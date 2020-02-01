@@ -73,12 +73,12 @@ devenv-shell:
 
 # TODO: add devenv-clean job to allow cleaning and thus building from scratch
 devenv-build:
-	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) bash -lc 'cp -a /src/packages/* /dst/; cp -av /src/test-packages/* /dst/; for PKG in $$(ls /dst); do make -C /dst/$${PKG}/src; done'
+	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) 'cp -a /src/packages/* /dst/; cp -av /src/test-packages/* /dst/; for PKG in $$(ls /dst); do make -C /dst/$${PKG}/src; done'
 	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo "request packages reload" | ncs_cli -u admin -g ncsadmin'
 	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo "show packages" | ncs_cli -u admin -g ncsadmin'
 
 devenv-clean:
-	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) bash -lc 'ls /dst/ | xargs --no-run-if-empty rm -rf'
+	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) 'ls /dst/ | xargs --no-run-if-empty rm -rf'
 
 devenv-start:
 	docker volume create $(CNT_PREFIX)-packages
