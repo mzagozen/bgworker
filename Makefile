@@ -1,3 +1,4 @@
+SHELL=/bin/bash
 # Include standard NID (NSO in Docker) package Makefile that defines all
 # standard make targets
 -include nidpackage.mk
@@ -7,12 +8,18 @@ testenv-start-extra:
 	@echo "Starting repository specific testenv"
 
 testenv-test:
-	@echo "TODO: Fill in your tests here"
-# Some examples for how to run commands in the ncs_cli:
-#	$(MAKE) testenv-runcmd CMD="show packages"
-#	$(MAKE) testenv-runcmd CMD="request packages reload"
-# Multiple commands in a single session also works - great for configuring stuff:
-#	$(MAKE) testenv-runcmd CMD="configure\n set foo bar\n commit"
-# We can test for certain output by combining show commands in the CLI with for
-# example grep:
-#	$(MAKE) testenv-runcmd CMD="show configuration foo" | grep bar
+	$(MAKE) testenv-test-counter-working
+	$(MAKE) testenv-runcmd CMD="configure\n set tbgw disabled\n commit"
+	$(MAKE) testenv-test-counter-stopped
+	$(MAKE) testenv-test-counter-stopped
+	$(MAKE) testenv-runcmd CMD="configure\n set tbgw enabled\n commit"
+	$(MAKE) testenv-test-counter-working
+
+
+testenv-test-counter-working:
+	@echo "-- Verify counter is being incremented"
+	diff <($(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }') <(sleep 2; $(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }'); test $$? -eq 1
+
+testenv-test-counter-stopped:
+	@echo "-- Verify counter is not being incremented"
+	diff <($(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }') <(sleep 2; $(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }')
