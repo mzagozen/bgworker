@@ -1,0 +1,16 @@
+<ncs-package xmlns="http://tail-f.com/ns/ncs-packages">
+  <name>test-bgworker</name>
+  <package-version>1.0</package-version>
+  <description>Test package for bgworker</description>
+  <ncs-min-version>4.5</ncs-min-version>
+  <required-package>
+    <name>bgworker</name>
+  </required-package>
+
+  <component>
+    <name>main</name>
+    <application>
+      <python-class-name>tbgw.main.Main</python-class-name>
+    </application>
+  </component>
+</ncs-package>

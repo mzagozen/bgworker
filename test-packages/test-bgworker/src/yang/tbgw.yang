@@ -1,0 +1,17 @@
+module tbgw {
+
+  namespace "http://example.com/tbgw";
+  prefix tbgw;
+
+  container tbgw {
+    leaf enabled {
+      type boolean;
+      default true;
+    }
+    leaf counter {
+      config false;
+      type uint32;
+      default 0;
+    }
+  }
+}
