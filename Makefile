@@ -11,7 +11,6 @@ testenv-test:
 	$(MAKE) testenv-test-counter-working
 	$(MAKE) testenv-runcmd CMD="configure\n set tbgw disabled\n commit"
 	$(MAKE) testenv-test-counter-stopped
-	$(MAKE) testenv-test-counter-stopped
 	$(MAKE) testenv-runcmd CMD="configure\n set tbgw enabled\n commit"
 	$(MAKE) testenv-test-counter-working
 
@@ -22,4 +21,4 @@ testenv-test-counter-working:
 
 testenv-test-counter-stopped:
 	@echo "-- Verify counter is not being incremented"
-	diff <($(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }') <(sleep 2; $(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }')
+	diff <($(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }') <(sleep 5; $(MAKE) testenv-runcmd CMD="show tbgw counter" | awk '/^tbgw counter/ { print $$3 }')
