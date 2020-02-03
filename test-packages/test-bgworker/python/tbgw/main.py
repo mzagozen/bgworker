@@ -7,16 +7,16 @@ import time
 import ncs
 from ncs.application import Service
 
-from . import background_process
+from bgworker import background_process
 
-def bg_worker():
+def test_bgwork():
     log = logging.getLogger()
 
     while True:
-        with ncs.maapi.single_write_trans('bgworker', 'system', db=ncs.OPERATIONAL) as oper_trans_write:
+        with ncs.maapi.single_write_trans('tbgw', 'system', db=ncs.OPERATIONAL) as oper_trans_write:
             root = ncs.maagic.get_root(oper_trans_write)
-            cur_val = root.bgworker.counter
-            root.bgworker.counter += 1
+            cur_val = root.tbgw.counter
+            root.tbgw.counter += 1
             oper_trans_write.apply()
 
         log.debug("Hello from background worker process, increment counter from {} to {}".format(cur_val, cur_val+1))
@@ -32,7 +32,7 @@ def bg_worker():
 class Main(ncs.application.Application):
     def setup(self):
         self.log.info('Main RUNNING')
-        self.p = background_process.Process(self, bg_worker, config_path='/bgworker/enabled')
+        self.p = background_process.Process(self, test_bgwork, config_path='/tbgw/enabled')
         self.p.start()
 
     def teardown(self):

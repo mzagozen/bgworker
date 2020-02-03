@@ -20,13 +20,17 @@ import socket
 import threading
 import time
 import traceback
-import typing
+from typing import Union, Iterable, cast
 
+from _ncs import events
 import ncs
-from ncs.experimental import Subscriber
+try:
+    from ncs.cdb import Subscriber          # type: ignore
+except ImportError:
+    from ncs.experimental import Subscriber # type: ignore
 
 
-def _get_handler_impls(logger: logging.Logger) -> typing.Iterable[logging.Handler]:
+def _get_handler_impls(logger: logging.Logger) -> Iterable[logging.Handler]:
     """For a given Logger instance, find the registered handlers.
 
     A Logger instance may have handlers registered in the 'handlers' list.
@@ -35,15 +39,19 @@ def _get_handler_impls(logger: logging.Logger) -> typing.Iterable[logging.Handle
     all relevant handlers.
     """
 
-    c = logger
-    while c:
-        for hdlr in c.handlers:
-            yield hdlr
-        if not c.propagate:
-            c = None    #break out
-        else:
-            c = c.parent
-
+    c: Union[logging.Logger, logging.PlaceHolder, None] = logger
+    while c is not None:
+        if isinstance(c, logging.Logger):
+            for hdlr in c.handlers:
+                yield hdlr
+            if not c.propagate:
+                c = None    #break out
+            else:
+                c = c.parent
+        elif isinstance(c, logging.PlaceHolder):
+            # we silence mypy here, as logging.PlaceHolder _has_ the parent
+            # attribute, but it is defined at runtime
+            c = c.parent    # type: ignore
 
 def _bg_wrapper(pipe_unused, log_q, log_config_q, log_level, bg_fun, *bg_fun_args):
     """Internal wrapper for the background worker function.
@@ -107,7 +115,7 @@ class Process(threading.Thread):
 
         self.vmid = self.app._ncs_id
 
-        self.mp_ctx = multiprocessing.get_context('spawn')
+        self.mp_ctx = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
         self.q = self.mp_ctx.Queue()
 
         # start the config subscriber thread
@@ -153,9 +161,7 @@ class Process(threading.Thread):
                 # This is an expensive operation invoking a data provider, thus
                 # we don't want to incur any unnecessary locks
                 with m.start_read_trans(db=ncs.OPERATIONAL) as oper_t_read:
-                    # Check if HA is enabled. This can only be configured in
-                    # ncs.conf and requires NSO restart, so it is fine if we
-                    # just read it the once.
+                    # check if HA is enabled
                     if oper_t_read.exists("/tfnm:ncs-state/tfnm:ha"):
                         self.ha_enabled = True
                     else:
@@ -184,13 +190,13 @@ class Process(threading.Thread):
                     self.worker_stop()
 
                 # check for input
-                waitable_rfds = [self.q._reader]
+                waitable_rfds = [self.q._reader] # type: ignore
                 if should_run:
                     waitable_rfds.append(self.parent_pipe)
 
                 rfds, _, _ = select.select(waitable_rfds, [], [])
                 for rfd in rfds:
-                    if rfd == self.q._reader:
+                    if rfd == self.q._reader: # type: ignore
                         k, v = self.q.get()
 
                         if k == 'exit':
@@ -205,6 +211,7 @@ class Process(threading.Thread):
                         # child is dead - wait for it to die and start again
                         # we'll restart it at the top of the loop
                         self.log.info("Child process died")
+                        assert isinstance(self.worker, multiprocessing.Process)
                         if self.worker.is_alive():
                             self.worker.join()
 
@@ -257,7 +264,7 @@ class Process(threading.Thread):
         # using multiprocessing.Pipe which is shareable across a spawned
         # process, while os.pipe only works, per default over to a forked
         # child
-        self.parent_pipe, child_pipe = self.mp_ctx.Pipe()
+        self.parent_pipe, child_pipe = self.mp_ctx.Pipe(duplex=True)
 
         # Instead of calling the bg_fun worker function directly, call our
         # internal wrapper to set up things like inter-process logging through
@@ -397,7 +404,6 @@ class HaEventListener(threading.Thread):
         self.app.add_running_thread(self.__class__.__name__ + ' (HA event listener)')
 
         self.log.info('run() HA event listener')
-        from _ncs import events
         mask = events.NOTIF_HA_INFO
         event_socket = socket.socket()
         events.notifications_connect(event_socket, mask, ip='127.0.0.1', port=ncs.PORT)

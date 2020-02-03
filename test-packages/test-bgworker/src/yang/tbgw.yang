@@ -1,9 +1,9 @@
-module bgworker {
+module tbgw {
 
-  namespace "http://example.com/bgworker";
-  prefix bgworker;
+  namespace "http://example.com/tbgw";
+  prefix tbgw;
 
-  container bgworker {
+  container tbgw {
     leaf enabled {
       type boolean;
       default true;
