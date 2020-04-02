@@ -40,7 +40,7 @@ else
 PROJECT_NAME:=$(shell basename $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST)))))
 endif
 
--include nidcommon.mk
+include nidcommon.mk
 
 all:
 	$(MAKE) build
@@ -52,18 +52,27 @@ test:
 	$(MAKE) testenv-stop
 
 
-build:
-	docker build --target testnso -t $(IMAGE_PATH)$(PROJECT_NAME)-testnso:$(DOCKER_TAG) --build-arg NSO_IMAGE_PATH=$(NSO_IMAGE_PATH) --build-arg NSO_VERSION=$(NSO_VERSION) .
-	docker build --target package -t $(IMAGE_PATH)$(PROJECT_NAME):$(DOCKER_TAG) --build-arg NSO_IMAGE_PATH=$(NSO_IMAGE_PATH) --build-arg NSO_VERSION=$(NSO_VERSION) .
+Dockerfile: Dockerfile.in $(wildcard includes/*)
+	@echo "Generating Dockerfile"
+	cp Dockerfile.in Dockerfile
+	@echo "Injecting includes from include manifest into Dockerfile"
+# expand variables before injecting them into the Dockerfile as otherwise we
+# would have to pass all the variables as build-args which makes this much
+# harder to do in a generic manner
+	for DEP_NAME in $$(ls includes/* | xargs --no-run-if-empty -n1 basename); do export DEP_URL=$$( (echo -n "echo "; cat includes/$${DEP_NAME}) | $(SHELL) -); sed -i -e "s;# DEP_END;FROM $${DEP_URL} AS $${DEP_NAME}\n# DEP_END;" -e "s;^# DEP_INC_END;COPY --from=$${DEP_NAME} /var/opt/ncs/packages/ /var/opt/ncs/packages/\n# DEP_INC_END;" Dockerfile; done
+
+build: check-nid-available Dockerfile
+	docker build --target testnso -t $(IMAGE_PATH)$(PROJECT_NAME)/testnso:$(DOCKER_TAG) --build-arg NSO_IMAGE_PATH=$(NSO_IMAGE_PATH) --build-arg NSO_VERSION=$(NSO_VERSION) .
+	docker build --target package -t $(IMAGE_PATH)$(PROJECT_NAME)/package:$(DOCKER_TAG) --build-arg NSO_IMAGE_PATH=$(NSO_IMAGE_PATH) --build-arg NSO_VERSION=$(NSO_VERSION) .
 
 push:
-	docker push $(IMAGE_PATH)$(PROJECT_NAME):$(DOCKER_TAG)
+	docker push $(IMAGE_PATH)$(PROJECT_NAME)/package:$(DOCKER_TAG)
 
 tag-release:
-	docker tag $(IMAGE_PATH)$(PROJECT_NAME):$(DOCKER_TAG) $(IMAGE_PATH)$(PROJECT_NAME):$(NSO_VERSION)
+	docker tag $(IMAGE_PATH)$(PROJECT_NAME)/package:$(DOCKER_TAG) $(IMAGE_PATH)$(PROJECT_NAME)/package:$(NSO_VERSION)
 
 push-release:
-	docker push $(IMAGE_PATH)$(PROJECT_NAME):$(NSO_VERSION)
+	docker push $(IMAGE_PATH)$(PROJECT_NAME)/package:$(NSO_VERSION)
 
 
 # Development environment targets
@@ -71,14 +80,13 @@ push-release:
 devenv-shell:
 	docker run -it -v $$(pwd):/src $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION)
 
-# TODO: add devenv-clean job to allow cleaning and thus building from scratch
 devenv-build:
-	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) 'cp -a /src/packages/* /dst/; cp -av /src/test-packages/* /dst/; for PKG in $$(ls /dst); do make -C /dst/$${PKG}/src; done'
-	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo "request packages reload" | ncs_cli -u admin -g ncsadmin'
-	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo "show packages" | ncs_cli -u admin -g ncsadmin'
+	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) bash -lc 'cp -a /src/packages/* /dst/; cp -av /src/test-packages/* /dst/; for PKG in $$(ls /src/packages /src/test-packages); do make -C /dst/$${PKG}/src; done'
+	$(MAKE) testenv-runcmdJ CMD="request packages reload"
+	$(MAKE) testenv-runcmdJ CMD="show packages"
 
 devenv-clean:
-	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) 'ls /dst/ | xargs --no-run-if-empty rm -rf'
+	docker run -it --rm -v $(PWD):/src -v $(CNT_PREFIX)-packages:/dst $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) bash -lc 'ls /dst/ | xargs --no-run-if-empty rm -rf'
 
 devenv-start:
 	docker volume create $(CNT_PREFIX)-packages
@@ -88,10 +96,11 @@ devenv-start:
 # Test environment targets
 
 testenv-start:
-	docker run -td --name $(CNT_PREFIX)-nso --label $(CNT_PREFIX) $${NSO_EXTRA_ARGS} $(IMAGE_PATH)$(PROJECT_NAME)-testnso:$(DOCKER_TAG)
-	docker exec -t $(CNT_PREFIX)-nso bash -lc 'ncs --wait-started 600'
-	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo "show packages" | ncs_cli -u admin -g ncsadmin'
+	-docker network create $(CNT_PREFIX)
+	docker run -td --name $(CNT_PREFIX)-nso $(DOCKER_ARGS) -e ADMIN_PASSWORD=NsoDocker1337 $${NSO_EXTRA_ARGS} $(IMAGE_PATH)$(PROJECT_NAME)/testnso:$(DOCKER_TAG)
 	$(MAKE) testenv-start-extra
+	docker exec -t $(CNT_PREFIX)-nso bash -lc 'ncs --wait-started 600'
+	$(MAKE) testenv-runcmdJ CMD="show packages"
 
 testenv-stop:
 	docker ps -aq --filter label=$(CNT_PREFIX) | xargs --no-run-if-empty docker rm -f
@@ -102,10 +111,10 @@ testenv-shell:
 	docker exec -it $(CNT_PREFIX)-nso bash -l
 
 testenv-cli:
-	docker exec -it $(CNT_PREFIX)-nso bash -lc 'ncs_cli -u admin -g ncsadmin'
+	docker exec -it $(CNT_PREFIX)-nso bash -lc 'ncs_cli -u admin'
 
-testenv-runcmd:
+testenv-runcmdC testenv-runcmdJ:
 	@if [ -z "$(CMD)" ]; then echo "CMD variable must be set"; false; fi
-	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo -e "$(CMD)" | ncs_cli -u admin -g ncsadmin'
+	docker exec -t $(CNT_PREFIX)-nso$(NSO) bash -lc 'echo -e "$(CMD)" | ncs_cli -$(subst testenv-runcmd,,$@)u admin'
 
 .PHONY: all test build push tag-release push-release devenv-shell devenv-build devenv-start testenv-start testenv-test testenv-stop

@@ -66,6 +66,11 @@
 # recommendation is to get across the threshold and use them in the prescribed
 # manner.
 
+# require that NSO_VERSION is set
+ifeq ($(NSO_VERSION),)
+$(error "ERROR: variable NSO_VERSION must be set, for example to '5.2.1' to build based on NSO version 5.2.1")
+endif
+
 # Set PNS - our pseudo-namespace or pipeline namespace. All containers running
 # within a CI pipeline will have the same namespace, which isn't a namespace
 # like what Linux supports but it's just a prefix used for the docker containers
@@ -82,11 +87,43 @@ endif
 DOCKER_TAG?=$(NSO_VERSION)-$(PNS)
 CNT_PREFIX?=testenv-$(PROJECT_NAME)-$(NSO_VERSION)-$(PNS)
 
-# Path for the NSO docker images (NSO_IMAGE_PATH) is derived based on
-# information we get from Gitlab CI, if available. Similarly, the path we use
-# for the images we produce is also based on information from Gitlab CI.
+# There are three important paths that we provide:
+# - NSO_IMAGE_PATH is the path to where we can find the standard nso-docker images
+#   cisco-nso-base and cisco-nso-dev
+# - IMAGE_PATH is the path to where we should write our resulting output images
+# - PKG_PATH is the path from where we pull in dependencies, i.e. the included
+#   packages
+# All three are derived from information we get from GitLab CI, if available.
+# These defaults can be overridden simply by setting the variables in the
+# environment.
 ifneq ($(CI_REGISTRY),)
 NSO_IMAGE_PATH?=$(CI_REGISTRY)/$(CI_PROJECT_NAMESPACE)/nso-docker/
-IMAGE_PATH?=$(CI_REGISTRY_IMAGE)/
+IMAGE_PATH?=$(CI_REGISTRY)/$(CI_PROJECT_NAMESPACE)/
 PKG_PATH?=$(CI_REGISTRY)/$(CI_PROJECT_NAMESPACE)/
 endif
+
+DOCKER_ARGS=--network $(CNT_PREFIX) --label $(CNT_PREFIX)
+
+.PHONE: check-nid-available
+
+check-nid-available:
+# Check for the existance of the NID base and dev images.
+# We don't need this check from a strictly functional perspective as builds or
+# tests would fail anyway but by explicitly checking we can make some
+# guesstimates and provide hints to the user on what might be wrong.
+	@echo "Checking NSO in Docker images are available..." \
+		&& docker inspect $(NSO_IMAGE_PATH)cisco-nso-base:$(NSO_VERSION) >/dev/null 2>&1 \
+		|| (echo "ERROR: The docker image $(NSO_IMAGE_PATH)cisco-nso-base:$(NSO_VERSION) does not exist"; \
+			if [ -z "$(NSO_IMAGE_PATH)" ]; then \
+				docker image inspect $(NSO_IMAGE_PATH)cisco-nso-base:$(NSO_VERSION)-$(PNS) >/dev/null 2>&1 \
+					&& echo "HINT: You have a locally built image cisco-nso-base:$(NSO_VERSION)-$(PNS), use it for this build by setting NSO_VERSION=$(NSO_VERSION)-$(PNS) or retag it by using the 'tag-release' make target in the nso-docker repo where the image was built" && exit 1; \
+				docker image inspect $(NSO_IMAGE_PATH)cisco-nso-base:$(NSO_VERSION)-$(PNS) >/dev/null 2>&1 \
+					|| echo "HINT: Set NSO_IMAGE_PATH to the registry path of the nso-docker repo, for example 'registry.gitlab.com/nso-developer/nso-docker/'" && false; \
+			else \
+				echo "Image not found locally, pulling from registry..."; \
+				docker pull $(NSO_IMAGE_PATH)cisco-nso-base:$(NSO_VERSION) 2>/dev/null \
+					|| (echo "ERROR: $(NSO_IMAGE_PATH)cisco-nso-base:$(NSO_VERSION) not found"; \
+							echo "$(NSO_IMAGE_PATH)" | grep "/$$" >/dev/null || echo "HINT: did you forget a trailing '/' in NSO_IMAGE_PATH?"; \
+							echo "HINT: Is NSO_IMAGE_PATH correctly set? Set NSO_IMAGE_PATH to the registry URL of the nso-docker repo, for example 'registry.gitlab.com/nso-developer/nso-docker/'"; \
+							false); \
+			fi)

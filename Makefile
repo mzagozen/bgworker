@@ -1,7 +1,7 @@
 SHELL=/bin/bash
 # Include standard NID (NSO in Docker) package Makefile that defines all
 # standard make targets
--include nidpackage.mk
+include nidpackage.mk
 
 # The following are specific to this repositories packages
 testenv-start-extra:
