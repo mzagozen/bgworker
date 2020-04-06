@@ -27,7 +27,7 @@ def test_bgwork():
 #        if random.randint(0, 10) == 9:
 #            log.error("Bad dice value")
 #            sys.exit(1)
-        time.sleep(2)
+        time.sleep(1)
 
 class Main(ncs.application.Application):
     def setup(self):
