@@ -97,7 +97,18 @@ class LogReconfigurator(threading.Thread):
 class Process(threading.Thread):
     """Supervisor for running the main background process and reacting to
     various events
+
+    We hardcode the decision to use the 'spawn' method for worker processes.
+    While this is heavier than a fork, it is the safest method that make sure
+    *no locks* can be "forked" over to the worker while not being unlocked. We
+    spent a lot of time chasing down deadlocks in the logging and file access
+    modules.
     """
+
+    # The context is actually a singleton, so it is safe to declare this as a
+    # class attribute once and access it where needed
+    mp_ctx = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
+
     def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None):
         super(Process, self).__init__()
         self.app = app
@@ -113,8 +124,7 @@ class Process(threading.Thread):
 
         self.vmid = self.app._ncs_id
 
-        self.mp_ctx = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
-        self.q = self.mp_ctx.Queue()
+        self.q = self.new_queue()
 
         # start the config subscriber thread
         if self.config_path is not None:
@@ -129,13 +139,13 @@ class Process(threading.Thread):
 
         # start the logging QueueListener thread
         hdlrs = list(_get_handler_impls(self.app._logger))
-        self.log_queue = self.mp_ctx.Queue()
+        self.log_queue = self.new_queue()
         self.queue_listener = logging.handlers.QueueListener(self.log_queue, *hdlrs, respect_handler_level=True)
         self.queue_listener.start()
         self.current_log_level = self.app._logger.getEffectiveLevel()
 
         # start log config CDB subscriber
-        self.log_config_q = self.mp_ctx.Queue()
+        self.log_config_q = self.new_queue()
         self.log_config_subscriber = Subscriber(app=self.app, log=self.log)
         log_subscriber_iter = LogConfigSubscriber(self.log_config_q, self.vmid)
         log_subscriber_iter.register(self.log_config_subscriber)
@@ -290,6 +300,10 @@ class Process(threading.Thread):
             self.log.error("{}: worker not terminated on time, alive: {}  process: {}".format(self, self.worker.is_alive(), self.worker))
 
 
+    @classmethod
+    def new_queue(cls) -> multiprocessing.Queue:
+        """Create a new Queue object using the correct (shared) multiprocessing context"""
+        return cls.mp_ctx.Queue()
 
 class ConfigSubscriber(object):
     """CDB subscriber for background worker process
