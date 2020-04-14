@@ -20,7 +20,7 @@ import socket
 import threading
 import time
 import traceback
-from typing import Union, Iterable, cast
+from typing import Any, Callable, Iterable, Optional, Tuple, Union, cast
 
 from _ncs import events
 import ncs
@@ -98,13 +98,11 @@ class Process(threading.Thread):
     """Supervisor for running the main background process and reacting to
     various events
     """
-    def __init__(self, app, bg_fun, bg_fun_args=None, config_path=None):
+    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None):
         super(Process, self).__init__()
         self.app = app
         self.bg_fun = bg_fun
-        if bg_fun_args is None:
-            bg_fun_args = []
-        self.bg_fun_args = bg_fun_args
+        self.bg_fun_args = bg_fun_args or ()
         self.config_path = config_path
         self.parent_pipe = None
 
@@ -143,7 +141,7 @@ class Process(threading.Thread):
         log_subscriber_iter.register(self.log_config_subscriber)
         self.log_config_subscriber.start()
 
-        self.worker = None
+        self.worker: Optional[multiprocessing.context.SpawnProcess] = None
 
         # Read initial configuration, using two separate transactions
         with ncs.maapi.Maapi() as m:
@@ -269,7 +267,7 @@ class Process(threading.Thread):
         # Instead of calling the bg_fun worker function directly, call our
         # internal wrapper to set up things like inter-process logging through
         # a queue.
-        args = [child_pipe, self.log_queue, self.log_config_q, self.current_log_level, self.bg_fun] + self.bg_fun_args
+        args = (child_pipe, self.log_queue, self.log_config_q, self.current_log_level, self.bg_fun, *self.bg_fun_args)
         self.worker = self.mp_ctx.Process(target=_bg_wrapper, args=args)
         self.worker.start()
 
