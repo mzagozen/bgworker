@@ -23,7 +23,7 @@ pylint:
 	PYLINTHOME=.pylint.d $(PYLINT) --ignore=namespaces $(MY_PY_SRC)
 
 mypy:
-	mypy $(MY_PY_SRC) --check-untyped-defs --ignore-missing-imports || true
+	mypy $(MY_PY_SRC) --check-untyped-defs --ignore-missing-imports
 
 clean: clean-pylint clean-mypy clean-pycache
 
