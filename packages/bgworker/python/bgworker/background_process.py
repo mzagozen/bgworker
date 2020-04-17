@@ -20,7 +20,7 @@ import socket
 import threading
 import time
 import traceback
-from typing import Any, Callable, Iterable, Optional, Tuple, Union, cast
+from typing import Any, Callable, ClassVar, Iterable, Optional, Tuple, Union, cast
 
 from _ncs import events
 import ncs
@@ -106,8 +106,10 @@ class Process(threading.Thread):
     """
 
     # The context is actually a singleton, so it is safe to declare this as a
-    # class attribute once and access it where needed
-    mp_ctx = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
+    # class attribute once and access it where needed.
+    # TODO: mypy 0.670 (currently installed) needs the additional cast to get
+    # the annotaton right
+    mp_ctx: ClassVar[multiprocessing.context.SpawnContext] = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
 
     def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None):
         super(Process, self).__init__()
