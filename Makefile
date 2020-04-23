@@ -3,15 +3,14 @@ SHELL=/bin/bash
 # standard make targets
 include nidpackage.mk
 
-# The following are specific to this repositories packages
-testenv-start-extra:
-	@echo "Starting repository specific testenv"
-# Start extra things, for example a netsim container by doing:
-# docker run -td --name $(CNT_PREFIX)-my-netsim --network-alias mynetsim1 $(DOCKER_ARGS) $(IMAGE_PATH)my-ned-repo/netsim:$(DOCKER_TAG)
-# Note how it becomes available under the name 'mynetsim1' from the NSO
-# container, i.e. you can set the device address to 'mynetsim1' and it will
-# magically work.
+# The rest of this file is specific to this repository.
 
+# Start extra containers or place things you want to run once, after startup of
+# the containers, in testenv-start-extra.
+testenv-start-extra:
+	@echo "\n== Starting repository specific testenv"
+
+# Tests go in testenv-test
 testenv-test:
 	$(MAKE) testenv-test-counter-working
 	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw disabled\n commit"
