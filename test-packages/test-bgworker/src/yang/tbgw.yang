@@ -1,13 +1,27 @@
 module tbgw {
-
+  yang-version "1.1";
   namespace "http://example.com/tbgw";
   prefix tbgw;
+
+  import tailf-common {
+    prefix tailf;
+  }
 
   container tbgw {
     leaf enabled {
       type boolean;
       default true;
     }
+
+    action emergency-stop {
+      tailf:actionpoint "tbgw-emergency-stop";
+      output {
+        leaf result {
+          type string;
+        }
+      }
+    }
+
     leaf counter {
       config false;
       type uint32;
