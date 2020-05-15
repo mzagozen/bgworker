@@ -492,6 +492,7 @@ class WaitableEvent:
         os.close(self._read_fd)
         os.close(self._write_fd)
 
+
 class EmergencyStop(ncs.dp.Action):
     def init(self, worker):  # pylint: disable=arguments-differ
         self.worker = worker
@@ -499,7 +500,29 @@ class EmergencyStop(ncs.dp.Action):
     @ncs.dp.Action.action
     def cb_action(self, uinfo, name, kp, action_input, action_output, t_read):
         self.worker.emergency_stop()
+        action_output.result = f'Background worker temporarily stopped. Disable in configuration to make it permanent. Package reload or restart of NSO will start it again. To manually restart, issue the \'restart\' action.'
+
+
+class RestartWorker(ncs.dp.Action):
+    def init(self, worker):  # pylint: disable=arguments-differ
+        self.worker = worker
+
+    @ncs.dp.Action.action
+    def cb_action(self, uinfo, name, kp, action_input, action_output, t_read):
+        # Check if the worker is enabled in config. If not, then the user
+        # should simply enable it and the worker will start. If it is enabled
+        # but not running, it was likely stopped through emergency-stop and we
+        # can start it again.
         if self.worker.config_path:
-            action_output.result = f'Background worker stopped successfully. To restart, redeploy the package.'
+            enabled = t_read.get_elem(self.worker.config_path)
+
+            if enabled:
+                self.worker.worker_stop()
+                self.worker.worker_start()
+                action_output.result = f'Background worker restarted'
+            else:
+                action_output.result = f'The background worker is disabled in configuration. To restart, enable {self.worker.config_path}'
         else:
-            action_output.result = 'Background worker stopped successfully. To restart, reload the package.'
+            self.worker.worker_stop()
+            self.worker.worker_start()
+            action_output.result = 'Background worker restarted'

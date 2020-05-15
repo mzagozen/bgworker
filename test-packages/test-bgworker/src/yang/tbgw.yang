@@ -13,6 +13,15 @@ module tbgw {
       default true;
     }
 
+    action restart {
+      tailf:actionpoint "tbgw-restart";
+      output {
+        leaf result {
+          type string;
+        }
+      }
+    }
+
     action emergency-stop {
       tailf:actionpoint "tbgw-emergency-stop";
       output {

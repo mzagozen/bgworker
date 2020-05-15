@@ -30,6 +30,24 @@ testenv-test-disable:
 	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw enabled\n commit"
 	$(MAKE) testenv-test-counter-working
 
+testenv-test-restart:
+	@echo -e "\n== Verify that restart works"
+	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw enabled\n commit"
+	$(MAKE) testenv-test-counter-working
+	@echo "-- Restart the worker"
+	$(MAKE) testenv-runcmdJ CMD="request tbgw restart"
+	$(MAKE) testenv-test-counter-working
+
+testenv-test-restart-disable:
+	@echo -e "\n== Verify that restart won't start disabled worker"
+	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw disabled\n commit"
+	$(MAKE) testenv-test-counter-stopped
+	@echo "-- Restart the worker"
+	$(MAKE) testenv-runcmdJ CMD="request tbgw restart" | grep "The background worker is disabled in configuration"
+	$(MAKE) testenv-test-counter-stopped
+	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw enabled\n commit"
+	$(MAKE) testenv-test-counter-working
+
 testenv-test-emergency-stop:
 	@echo -e "\n== Verify that the emergency-stop action works"
 	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw enabled\n commit"
@@ -41,6 +59,21 @@ testenv-test-emergency-stop:
 	@echo "-- Enable worker again by redeploying"
 	$(MAKE) testenv-runcmdJ CMD="request packages reload"
 	$(MAKE) testenv-test-counter-working
+
+testenv-test-emergency-stop-and-restart:
+	@echo -e "\n== Verify that the emergency-stop action works"
+	@echo "-- Ensure worker is enabled in configuration"
+	$(MAKE) testenv-runcmdJ CMD="configure\n set tbgw enabled\n commit"
+	$(MAKE) testenv-test-counter-working
+	@echo "-- Signal the worker to stop immediately"
+	$(MAKE) testenv-runcmdJ CMD="request tbgw emergency-stop"
+	$(MAKE) testenv-test-counter-stopped
+	@echo "-- Verify the worker was disabled"
+	$(MAKE) testenv-runcmdJ CMD="show configuration tbgw enabled" | grep disabled
+	@echo "-- Restart the worker"
+	$(MAKE) testenv-runcmdJ CMD="request tbgw restart"
+	$(MAKE) testenv-test-counter-working
+
 
 testenv-test-counter-working:
 	@echo "-- Verify counter is being incremented"
