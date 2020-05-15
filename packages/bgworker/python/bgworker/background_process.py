@@ -302,10 +302,22 @@ class Process(threading.Thread):
             self.log.error("{}: worker not terminated on time, alive: {}  process: {}".format(self, self.worker.is_alive(), self.worker))
 
 
+    def emergency_stop(self):
+        """Stop the background worker process
+
+        This only has effect while this package is running. Reloading packages
+        or restarting NSO will start the background worker again (if enabled in
+        configuration).
+        """
+        # Disable the worker immediately
+        self.q.put(('enabled', False))
+
+
     @classmethod
     def new_queue(cls) -> multiprocessing.Queue:
         """Create a new Queue object using the correct (shared) multiprocessing context"""
         return cls.mp_ctx.Queue()
+
 
 class ConfigSubscriber(object):
     """CDB subscriber for background worker process
@@ -479,3 +491,15 @@ class WaitableEvent:
     def __del__(self):
         os.close(self._read_fd)
         os.close(self._write_fd)
+
+class EmergencyStop(ncs.dp.Action):
+    def init(self, worker):  # pylint: disable=arguments-differ
+        self.worker = worker
+
+    @ncs.dp.Action.action
+    def cb_action(self, uinfo, name, kp, action_input, action_output, t_read):
+        self.worker.emergency_stop()
+        if self.worker.config_path:
+            action_output.result = f'Background worker stopped successfully. To restart, redeploy the package.'
+        else:
+            action_output.result = 'Background worker stopped successfully. To restart, reload the package.'

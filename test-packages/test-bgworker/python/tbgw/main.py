@@ -32,9 +32,10 @@ def test_bgwork():
 class Main(ncs.application.Application):
     def setup(self):
         self.log.info('Main RUNNING')
-        self.p = background_process.Process(self, test_bgwork, config_path='/tbgw/enabled')
-        self.p.start()
+        self.worker = background_process.Process(self, test_bgwork, config_path='/tbgw/enabled')
+        self.register_action('tbgw-emergency-stop', background_process.EmergencyStop, init_args=self.worker)
+        self.worker.start()
 
     def teardown(self):
         self.log.info('Main FINISHED')
-        self.p.stop()
+        self.worker.stop()
