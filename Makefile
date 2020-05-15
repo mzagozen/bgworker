@@ -6,12 +6,7 @@ include nidpackage.mk
 # The rest of this file is specific to this repository.
 
 testenv-start-extra:
-	@echo -e "\n== Starting repository specific testenv"
-# Start extra things, for example a netsim container by doing:
-# docker run -td --name $(CNT_PREFIX)-my-netsim --network-alias mynetsim1 $(DOCKER_ARGS) $(IMAGE_PATH)my-ned-repo/netsim:$(DOCKER_TAG)
-# Note how it becomes available under the name 'mynetsim1' from the NSO
-# container, i.e. you can set the device address to 'mynetsim1' and it will
-# magically work.
+# NOOP
 
 # Tests go in testenv-test
 testenv-test:
