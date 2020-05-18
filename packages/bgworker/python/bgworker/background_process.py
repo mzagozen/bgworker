@@ -500,7 +500,7 @@ class EmergencyStop(ncs.dp.Action):
     @ncs.dp.Action.action
     def cb_action(self, uinfo, name, kp, action_input, action_output, t_read):
         self.worker.emergency_stop()
-        action_output.result = f'Background worker temporarily stopped. Disable in configuration to make it permanent. Package reload or restart of NSO will start it again. To manually restart, issue the \'restart\' action.'
+        action_output.result = 'Background worker temporarily stopped. Disable in configuration to make it permanent. Package reload or restart of NSO will start it again. To manually restart, issue the \'restart\' action.'
 
 
 class RestartWorker(ncs.dp.Action):
@@ -519,9 +519,9 @@ class RestartWorker(ncs.dp.Action):
             if enabled:
                 self.worker.worker_stop()
                 self.worker.worker_start()
-                action_output.result = f'Background worker restarted'
+                action_output.result = 'Background worker restarted'
             else:
-                action_output.result = f'The background worker is disabled in configuration. To restart, enable {self.worker.config_path}'
+                action_output.result = 'The background worker is disabled in configuration. To restart, enable {self.worker.config_path}'
         else:
             self.worker.worker_stop()
             self.worker.worker_start()
