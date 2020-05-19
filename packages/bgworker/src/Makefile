@@ -1,8 +1,7 @@
-all: pylint mypy
-.PHONY: all
-
-# Include standard NCS examples build definitions and rules
+include bmd.mk
 include pylint.mk
 
-clean:
+.PHONY: all
+all: ../build-meta-data.xml pylint mypy
 
+clean:
