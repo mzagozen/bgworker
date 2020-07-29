@@ -221,7 +221,8 @@ class Process(threading.Thread):
                         # child is dead - wait for it to die and start again
                         # we'll restart it at the top of the loop
                         self.log.info("Child process died")
-                        assert isinstance(self.worker, multiprocessing.Process)
+                        # silence mypy on the next line, v0.670 can't deal
+                        assert isinstance(self.worker, multiprocessing.process.BaseProcess) # type: ignore
                         if self.worker.is_alive():
                             self.worker.join()
 
