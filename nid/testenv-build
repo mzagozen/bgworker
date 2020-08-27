@@ -46,19 +46,22 @@ fi
 SUPPORTS_NEW_REDEPLOY=$(if [ ${NSO_VERSION_MAJOR} -gt 5 ] || [ ${NSO_VERSION_MAJOR} -eq 5 -a ${NSO_VERSION_MINOR} -ge 3 ]; then echo "true"; fi)
 
 if [ "${SUPPORTS_NEW_REDEPLOY}" = "true" ]; then
-    RELOAD_PATTERN="(package-meta-data.xml|\.cli$$|\.yang$$)"
+    RELOAD_PATTERN="(^package-meta-data.xml$|\.cli$|\.yang$)"
 else
-    RELOAD_PATTERN="(package-meta-data.xml|templates/.*\.xml$$|\.cli$$|\.yang$$)"
+    RELOAD_PATTERN="(^package-meta-data.xml$|templates/.*\.xml$|\.cli$|\.yang$)"
 fi
 echo ${RELOAD_PATTERN}
 
-# Copy in new source
+# Copy in new source using rsync. Exclude Emacs and vim temp files.
 # grep -v is for ignoring directory changes. We just care about changed files.
-rsync -aEim /src/packages/. /src/test-packages/. /var/opt/ncs/packages/ | grep -v "^\.d\.\.t\.\.\.\.\.\. " > /tmp/rsync.log
-for PKG_DIR in $(find /src/packages /src/test-packages -mindepth 1 -maxdepth 1 -type d); do
-    export PKG_NAME=$(basename ${PKG_DIR});
-    make -C /var/opt/ncs/packages/${PKG_NAME}/src;
-    OUTPUT_PATH=/var/opt/ncs/packages/${PKG_NAME}/ make -f /src/nid/bmd.mk -C ${PKG_DIR} build-meta-data.xml;
+rsync -aEim --exclude '.#*' --exclude '.*.sw[a-p]' /src/packages/. /src/test-packages/. /var/opt/ncs/packages/ | grep -v "^\.d\.\.t\.\.\.\.\.\. " > /tmp/rsync.log
+for PKG_SRC in $(find /src/packages /src/test-packages -mindepth 1 -maxdepth 1 -type d); do
+    export PKG_NAME=$(basename ${PKG_SRC});
+    export PKG_DIR=/var/opt/ncs/packages/${PKG_NAME}/
+    if [ -f "${PKG_DIR}pyvenv/bin/activate" ]; then . ${PKG_DIR}pyvenv/bin/activate; fi;
+    make -C /var/opt/ncs/packages/${PKG_NAME}/src || exit 1;
+    if [ -f "${PKG_DIR}pyvenv/bin/activate" ]; then deactivate; fi;
+    OUTPUT_PATH=${PKG_DIR}/ make -f /src/nid/bmd.mk -C ${PKG_SRC} build-meta-data.xml;
 done
 
 # Analyze what files were transferred and if we need to reload packages or
@@ -68,9 +71,19 @@ if [ $? -eq 0 ] || [ -n "${PACKAGE_RELOAD}" ]; then
     echo "-- Reloading packages for NSO ${NSO}";
     echo "request packages reload force" | ncs_cli -u admin
 else
+    # Keep track of individual redeploy errors and exit with code 1 if there are
+    # any failures
+    REDEPLOY_ERROR=0
     for PKG in $(sed -E 's,^........... ([^/]+).*,\1,' /tmp/rsync.log | sort | uniq); do
         echo "-- Redeploying package ${PKG} for NSO ${NSO}";
-        PKG_NAME=$(xmlstarlet sel -N x=http://tail-f.com/ns/ncs-packages -t -v "/x:ncs-package/x:name" -nl /var/opt/ncs/packages/${PKG}/package-meta-data.xml) && \
-            echo "request packages package ${PKG_NAME} redeploy" | ncs_cli -u admin
+        PKG_NAME=$(xmlstarlet sel -N x=http://tail-f.com/ns/ncs-packages -t -v "/x:ncs-package/x:name" -nl /var/opt/ncs/packages/${PKG}/package-meta-data.xml) || continue
+        PKG_RESULT=$(echo "request packages package ${PKG_NAME} redeploy" | ncs_cli -u admin) && echo "${PKG_RESULT}"
+        echo "${PKG_RESULT}" | grep "result false" >/dev/null
+        if [ $? -eq 0 ]; then
+            echo "-- Redeploying package ${PKG_NAME} failed, here is the output of \"show packages package ${PKG_NAME} oper-status\":"
+            echo "show packages package ${PKG_NAME} oper-status" | ncs_cli -u admin
+            REDEPLOY_ERROR=1
+        fi
     done
+    if [ $REDEPLOY_ERROR -eq 1 ]; then exit 1; fi
 fi
