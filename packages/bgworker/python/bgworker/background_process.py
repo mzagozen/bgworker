@@ -190,12 +190,12 @@ class Process(threading.Thread):
             try:
                 should_run = self.config_enabled and (not self.ha_enabled or self.ha_master)
 
-                if should_run and (self.worker is None or not self.worker.is_alive()):
+                if should_run and not self.is_running():
                     self.log.info("Background worker process should run but is not running, starting")
                     if self.worker is not None:
                         self.worker_stop()
                     self.worker_start()
-                if self.worker is not None and self.worker.is_alive() and not should_run:
+                if self.is_running() and not should_run:
                     self.log.info("Background worker process is running but should not run, stopping")
                     self.worker_stop()
 
@@ -313,6 +313,9 @@ class Process(threading.Thread):
         # Disable the worker immediately
         self.q.put(('enabled', False))
 
+    def is_running(self):
+        """Returns true if the background worker has started and is alive"""
+        return self.worker is not None and self.worker.is_alive()
 
     @classmethod
     def new_queue(cls) -> multiprocessing.Queue:
