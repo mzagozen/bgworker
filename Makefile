@@ -37,6 +37,8 @@ testenv-test-restart:
 	@echo "-- Restart the worker"
 	$(MAKE) testenv-runcmdJ CMD="request tbgw restart"
 	$(MAKE) testenv-test-counter-working
+	@echo "-- Ensure we have right number of Python processes (so we don't leak processes)"
+	docker exec -t $(CNT_PREFIX)-nso bash -lc 'ps auxwww' | awk 'BEGIN {c=0} /python/ { c++ } END { print "Got", c, "Python processes (expect 3)"; if (c != 3) { exit 1 }}'
 
 testenv-test-restart-disable:
 	@echo -e "\n== Verify that restart won't start disabled worker"

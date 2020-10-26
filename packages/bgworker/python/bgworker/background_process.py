@@ -215,6 +215,10 @@ class Process(threading.Thread):
                             self.config_enabled = v
                         elif k == "ha-master":
                             self.ha_master = v
+                        elif k == 'restart':
+                            self.log.info("Restarting the background worker process")
+                            self.worker_stop()
+                            self.worker_start()
 
                     if rfd == self.parent_pipe:
                         # getting a readable event on the pipe should mean the
@@ -303,6 +307,14 @@ class Process(threading.Thread):
             self.log.error("{}: worker not terminated on time, alive: {}  process: {}".format(self, self.worker.is_alive(), self.worker))
 
 
+    def restart(self):
+        """Restart the background worker process
+
+        We ask the supervisor to restart
+        """
+        self.log.info("Requesting supervisor to restart the background worker process")
+        self.q.put(('restart', None))
+
     def emergency_stop(self):
         """Stop the background worker process
 
@@ -311,6 +323,7 @@ class Process(threading.Thread):
         configuration).
         """
         # Disable the worker immediately
+        self.log.info("Requesting supervisor to stop the background worker process")
         self.q.put(('enabled', False))
 
 
@@ -518,12 +531,10 @@ class RestartWorker(ncs.dp.Action):
             enabled = t_read.get_elem(self.worker.config_path)
 
             if enabled:
-                self.worker.worker_stop()
-                self.worker.worker_start()
-                action_output.result = 'Background worker restarted'
+                self.worker.restart()
+                action_output.result = 'Requested supervisor to restart background worker'
             else:
                 action_output.result = 'The background worker is disabled in configuration. To restart, enable {self.worker.config_path}'
         else:
-            self.worker.worker_stop()
-            self.worker.worker_start()
-            action_output.result = 'Background worker restarted'
+            self.worker.restart()
+            action_output.result = 'Requested supervisor to restart background worker'
