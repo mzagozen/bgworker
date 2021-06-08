@@ -14,7 +14,10 @@ to handle, such as:
  - NCS package events like reload and redeploy
  - background worker process dying (will restart it)
  - configuration changes - enabling/disabling of the background worker
- - HA events - only run background process when HA master or HA is disabled
+ - HA events - only run background process when in specified HA mode
+   - per default runs when HA is disabled or HA mode = =master=
+   - can also be set to run when in HA mode =none= or =slave=
+   - or set to =always= to always run regardless of current HA mode
 
 The example code in this package does not demonstrate all the abilities of the
 process supervisor. It does have a random condition to die every now in a while

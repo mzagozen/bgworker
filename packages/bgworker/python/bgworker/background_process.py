@@ -111,12 +111,13 @@ class Process(threading.Thread):
     # the annotaton right
     mp_ctx: ClassVar[multiprocessing.context.SpawnContext] = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
 
-    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None):
+    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when='master'):
         super(Process, self).__init__()
         self.app = app
         self.bg_fun = bg_fun
         self.bg_fun_args = bg_fun_args or ()
         self.config_path = config_path
+        self.ha_when = ha_when
         self.parent_pipe = None
 
         self.log = app.log
@@ -180,7 +181,7 @@ class Process(threading.Thread):
                     # determine HA state if HA is enabled
                     if self.ha_enabled:
                         ha_mode = str(ncs.maagic.get_node(oper_t_read, '/tfnm:ncs-state/tfnm:ha/tfnm:mode'))
-                        self.ha_master = (ha_mode == 'master')
+                        self.ha_mode = ha_mode
 
 
     def run(self):
@@ -188,20 +189,35 @@ class Process(threading.Thread):
 
         while True:
             try:
-                should_run = self.config_enabled and (not self.ha_enabled or self.ha_master)
+                if self.config_enabled:
+                    if not self.ha_enabled:
+                        should_run = True
+                    else:
+                        if self.ha_when == 'always' or self.ha_when == self.ha_mode:
+                            should_run = True
+                        else:
+                            should_run = False
+                else:
+                    should_run = False
 
-                if should_run and not self.is_running():
-                    self.log.info("Background worker process should run but is not running, starting")
-                    if self.worker is not None:
+                if should_run:
+                    if self.worker is None or not self.worker.is_alive():
+                        self.log.info("Background worker process should run but is not running, starting")
                         self.worker_stop()
-                    self.worker_start()
-                if self.is_running() and not should_run:
-                    self.log.info("Background worker process is running but should not run, stopping")
-                    self.worker_stop()
+                        self.worker_start()
+                else:
+                    if not self.config_enabled:
+                        self.log.info("Background worker is disabled")
+                    elif self.ha_enabled:
+                        self.log.info(f"Background worker will not run when HA-when={self.ha_when} and HA-mode={self.ha_mode}")
+
+                    if self.worker is not None and self.worker.is_alive():
+                        self.log.info("Background worker process is running but should not run, stopping")
+                        self.worker_stop()
 
                 # check for input
                 waitable_rfds = [self.q._reader] # type: ignore
-                if should_run:
+                if should_run and self.parent_pipe is not None:
                     waitable_rfds.append(self.parent_pipe)
 
                 rfds, _, _ = select.select(waitable_rfds, [], [])
@@ -213,8 +229,8 @@ class Process(threading.Thread):
                             return
                         elif k == 'enabled':
                             self.config_enabled = v
-                        elif k == "ha-master":
-                            self.ha_master = v
+                        elif k == "ha-mode":
+                            self.ha_mode = v
                         elif k == 'restart':
                             self.log.info("Restarting the background worker process")
                             self.worker_stop()
@@ -232,7 +248,7 @@ class Process(threading.Thread):
 
             except Exception as e:
                 self.log.error('Unhandled exception in the supervisor thread: {} ({})'.format(type(e).__name__, e))
-                self.log.debug(traceback.format_exc())
+                self.log.error(traceback.format_exc())
                 time.sleep(1)
 
 
@@ -261,7 +277,8 @@ class Process(threading.Thread):
         self.log.debug("{}: stopping supervisor thread".format(self.name))
 
         self.q.put(('exit', None))
-        self.join()
+        if self.is_alive():
+            self.join()
         self.app.del_running_thread(self.name + ' (Supervisor)')
 
         # stop the background worker process
@@ -462,11 +479,11 @@ class HaEventListener(threading.Thread):
             ha_notif_type = notification['hnot']['type']
 
             if ha_notif_type == events.HA_INFO_IS_MASTER:
-                self.q.put(('ha-master', True))
+                self.q.put(('ha-mode', 'master'))
             elif ha_notif_type == events.HA_INFO_IS_NONE:
-                self.q.put(('ha-master', False))
+                self.q.put(('ha-mode', 'none'))
             elif ha_notif_type == events.HA_INFO_SLAVE_INITIALIZED:
-                self.q.put(('ha-master', False))
+                self.q.put(('ha-mode', 'slave'))
 
     def stop(self):
         self.exit_flag.set()
