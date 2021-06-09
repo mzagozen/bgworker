@@ -109,7 +109,7 @@ test-ha-none:
 	$(MAKE) testenv-test-counter-stopped
 	@echo "-- The tbgw-ha-always instance should be running though"
 	$(MAKE) testenv-test-counter-working TEST_TBGW=tbgw-ha-always
-	@echo "-- The tbgw-haslave instance should NOT run"
+	@echo "-- The tbgw-ha-slave instance should NOT run"
 	$(MAKE) testenv-test-counter-stopped TEST_TBGW=tbgw-ha-slave
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=master and HA-mode=none"
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=slave and HA-mode=none"
@@ -128,11 +128,11 @@ test-ha-master:
 	$(MAKE) testenv-runcmdJ NSO=$@ CMD="request high-availability be-master"
 	$(MAKE) testenv-runcmdJ NSO=$@ CMD="show ncs-state ha"
 	$(MAKE) testenv-runcmdJ NSO=$@ CMD="request packages reload"
-	@echo "-- Per default we expect bgworker to not run"
+	@echo "-- Per default we expect bgworker to run"
 	$(MAKE) testenv-test-counter-working
-	@echo "-- The tbgw-ha-always instance should be running though"
+	@echo "-- The tbgw-ha-always instance should be running too"
 	$(MAKE) testenv-test-counter-working TEST_TBGW=tbgw-ha-always
-	@echo "-- The tbgw-haslave instance should NOT run"
+	@echo "-- The tbgw-ha-slave instance should NOT run"
 	$(MAKE) testenv-test-counter-stopped TEST_TBGW=tbgw-ha-slave
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=slave and HA-mode=master"
 	-docker rm -f $(CNT_PREFIX)-nso$@
@@ -141,7 +141,7 @@ test-ha-master:
 HA_MASTER_ADDRESS=$$(docker inspect --format '{{range $$p, $$conf := .NetworkSettings.Networks}}{{(index $$conf).IPAddress}}{{end}}' $(CNT_PREFIX)-nso$@master | head -n1 | cat)
 test-ha-slave: export NSO=$@
 test-ha-slave:
-	@echo -e "\n== Ensure bgworker behavior when in HA-mode = master"
+	@echo -e "\n== Ensure bgworker behavior when in HA-mode = slave"
 	docker network inspect $(CNT_PREFIX) >/dev/null 2>&1 || docker network create $(CNT_PREFIX)
 	-docker rm -f $(CNT_PREFIX)-nso$@
 	-docker rm -f $(CNT_PREFIX)-nso$@master
