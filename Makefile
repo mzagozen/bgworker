@@ -113,7 +113,7 @@ test-ha-none:
 	$(MAKE) testenv-test-counter-stopped TEST_TBGW=tbgw-ha-slave
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=master and HA-mode=none"
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=slave and HA-mode=none"
-	#-docker rm -f $(CNT_PREFIX)-nso$@
+	-docker rm -f $(CNT_PREFIX)-nso$@
 
 test-ha-master: export NSO=$@
 test-ha-master:
