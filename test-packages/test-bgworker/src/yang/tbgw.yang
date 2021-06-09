@@ -37,4 +37,30 @@ module tbgw {
       default 0;
     }
   }
+
+  container tbgw-ha-always {
+    leaf enabled {
+      type boolean;
+      default true;
+    }
+
+    leaf counter {
+      config false;
+      type uint32;
+      default 0;
+    }
+  }
+
+  container tbgw-ha-slave {
+    leaf enabled {
+      type boolean;
+      default true;
+    }
+
+    leaf counter {
+      config false;
+      type uint32;
+      default 0;
+    }
+  }
 }
