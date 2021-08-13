@@ -111,13 +111,14 @@ class Process(threading.Thread):
     # the annotaton right
     mp_ctx: ClassVar[multiprocessing.context.SpawnContext] = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
 
-    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when='master'):
+    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when='master', backoff_timer=1):
         super(Process, self).__init__()
         self.app = app
         self.bg_fun = bg_fun
         self.bg_fun_args = bg_fun_args or ()
         self.config_path = config_path
         self.ha_when = ha_when
+        self.backoff_timer = backoff_timer
         self.parent_pipe = None
 
         self.log = app.log
@@ -187,6 +188,7 @@ class Process(threading.Thread):
     def run(self):
         self.app.add_running_thread(self.name + ' (Supervisor)')
 
+        has_run = False
         while True:
             try:
                 if self.config_enabled:
@@ -204,7 +206,10 @@ class Process(threading.Thread):
                     if self.worker is None or not self.worker.is_alive():
                         self.log.info("Background worker process should run but is not running, starting")
                         self.worker_stop()
+                        if has_run:
+                            time.sleep(self.backoff_timer)
                         self.worker_start()
+                    has_run = True
                 else:
                     if not self.config_enabled:
                         self.log.info("Background worker is disabled")
@@ -214,6 +219,7 @@ class Process(threading.Thread):
                     if self.worker is not None and self.worker.is_alive():
                         self.log.info("Background worker process is running but should not run, stopping")
                         self.worker_stop()
+                    has_run = False
 
                 # check for input
                 waitable_rfds = [self.q._reader] # type: ignore
