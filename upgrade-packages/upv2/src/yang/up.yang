@@ -1,0 +1,37 @@
+module up {
+  yang-version "1.1";
+  namespace "http://example.com/up";
+  prefix up;
+
+  import tailf-common {
+    prefix tailf;
+  }
+
+  revision 2021-11-30 {
+    description
+      "UPv2";
+  }
+
+  revision 2021-11-29 {
+    description
+      "Initial version";
+  }
+
+
+  container up {
+    list a {
+      key name;
+      leaf name {
+        type string;
+      }
+
+      leaf val1 {
+        type string;
+      }
+
+      leaf val2 {
+        type string;
+      }
+    }
+  }
+}
