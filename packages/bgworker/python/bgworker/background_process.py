@@ -138,8 +138,8 @@ class Process(threading.Thread):
             self.config_subscriber.start()
 
         # start the HA event listener thread
-        self.ha_event_listener = HaEventListener(app=self.app, q=self.q)
-        self.ha_event_listener.start()
+        self.event_listener = EventListener(app=self.app, q=self.q)
+        self.event_listener.start()
 
         # start the logging QueueListener thread
         hdlrs = list(_get_handler_impls(self.app._logger))
@@ -264,7 +264,7 @@ class Process(threading.Thread):
         """
         # stop the HA event listener
         self.log.debug("{}: stopping HA event listener".format(self.name))
-        self.ha_event_listener.stop()
+        self.event_listener.stop()
 
         # stop config CDB subscriber
         self.log.debug("{}: stopping config CDB subscriber".format(self.name))
@@ -446,9 +446,9 @@ class LogConfigSubscriber(object):
         self.q.put(("log-level", new_level))
 
 
-class HaEventListener(threading.Thread):
     """HA Event Listener
     HA events, like HA-mode transitions, are exposed over a notification API.
+class EventListener(threading.Thread):
     We listen on that and forward relevant messages over the queue to the
     supervisor which can act accordingly.
 
@@ -459,7 +459,7 @@ class HaEventListener(threading.Thread):
     loop.
     """
     def __init__(self, app, q):
-        super(HaEventListener, self).__init__()
+        super(EventListener, self).__init__()
         self.app = app
         self.log = app.log
         self.q = q
