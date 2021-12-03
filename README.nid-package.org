@@ -38,42 +38,65 @@
    After build, the test suite will start up a test environment (=testenv=) that consists of:
    - =nso= container running the =testnso= image
 
-   Then the tests, defined in the =testenv-test= target of the repository specific =Makefile=, are run. The skeleton contains some examples for how to run basic tests in NSO. The actual tests need to be adopted to the functionality of the NSO package in question.
+   Then the tests, defined in the =test= target of the repository specific =Makefile=, are run. The skeleton contains some examples for how to run basic tests in NSO. The actual tests need to be adopted to the functionality of the NSO package in question.
 
 ** The test environment - testenv
+   A =testenv= is a standardized test environment that contains recipes for
+   creating and tearing down all the containers, as well as configuration for
+   the test. Every project implementing the NID structure contains at least one
+   =testenv=.
    There are a number of make targets related to the control of =testenv=:
-   - =testenv-start=: Start the test environment
+   - =start=: Start the test environment
      - the standard topology, which consists of a single test NSO instance (of the =testnso= image) is defined in the standard form package skeleton
      - a Docker network specific to this testenv is used
        - this makes it possible to have network localized names, like a netsim can be called and accessed via the name =dev1= and Docker handles name resolution to the actual IP address
          - running multiple =testenv= in parallel won't collide as we have a network (namespace) per =testenv=
-     - it is possible to start up more containers, like netsims, which should be achieved by adding them to the =testenv-start-extra= target in =Makefile=
+       - IPv4 and IPv6 is enabled per default
+         - IPv6 uses ULA addressing (essentially a random IPv6 prefix)
+           - only local connectivity (no default route)
+         - manually specify the IPv6 prefix by setting =IPV6_NET=, for example ~IPV6_NET=2001:db8:1234:4567:~
+           - if you use a public prefix, there will be a default route for public connectivity
+         - disable IPv6 by setting ~IPV6=false~
+     - it is possible to start up more containers, like netsims or virtual routers, which should be achieved by adding them to the =start= target
        - ensure that you have ~$(DOCKER_ARGS)~ in the argument list to =docker=
-         - it starts the container in the correct Docker network and sets the correct label, which is a prerequisite for the =testenv-stop= target to work
-   - =testenv-build=: recompile packages and run ~request packages reload~ in all NSO containers
+         - it starts the container in the correct Docker network and sets the correct label, which is a prerequisite for the =stop= target to work
+   - =rebuild=: recompile packages and run ~request packages reload~ in all NSO containers
      - only packages in =packages/= will be rebuilt
      - included packages that are specified through manifests in the =includes/= directory, are not rebuilt
        - as they might not ship with their source code, it might not even be possible
-   - =testenv-clean-build=: for the running NSO container, clean out and rebuild all packages in =packages/= and =test-packages/= from scratch
-   - =testenv-stop=: Stop the test environment
+   - =clean-rebuild=: for the running NSO container, clean out and rebuild all packages in =packages/= and =test-packages/= from scratch
+   - =stop=: Stop the test environment
      - it removes all containers labeled with ~$(CNT_PREFIX)~
        - make sure any extra containers you start have this label by adding ~$(DOCKER_ARGS)~ to the argument list
        - any anonymous volumes associated with the containers will be removed as well
      - removes the Docker network
-   - =testenv-shell=: Get an interactive =bash= shell in the =testnso= container
-   - =testenv-cli=: Get an interactive NSO CLI (=ncs_cli=) in the =testnso= container
-   - =testenv-runcmdC= / =testenv-runcmdJ=: Run a command with =ncs_cli=, provide the command through the environment variable =CMD=
-     - the command is expected in the C-style CLI syntax for =testenv-runcmdC= or J-style CLI with =testenv-runcmdJ=
-     - the runcmd targets can be called to run a command, from an interactive shell like ~make testenv-runcmdJ CMD="show ncs-state version"~
+   - =shell=: Get an interactive =bash= shell in the =testnso= container
+   - =dev-shell=: Get an interactive =bash= shell in a container using the -dev image. The container is attached to the network namespace and volumes of the =testnso= container.
+   - =cli=: Get an interactive NSO CLI (=ncs_cli=) in the =testnso= container
+   - =runcmdC= / =runcmdJ=: Run a command with =ncs_cli=, provide the command through the environment variable =CMD=
+     - the command is expected in the C-style CLI syntax for =runcmdC= or J-style CLI with =runcmdJ=
+     - the runcmd targets can be called to run a command, from an interactive shell like ~make runcmdJ CMD="show ncs-state version"~
      - it can also be called from other make targets, for example to run commands from tests
-       - ~$(MAKE) testenv-runcmdJ CMD="show ncs-state version"~
+       - ~$(MAKE) runcmdJ CMD="show ncs-state version"~
 
-   To access NSO via one of its northbound interfaces, like NETCONF or RESTCONF, use the credentials =admin= / =NsoDocker1337=.
+   The environments are placed in the =testenvs= directory as subdirectories.
+   Typically the default =testenv= is a quick / simple test environment that is
+   fast to start and complete a basic test. The default =testenv= is defined
+   with the ~$(DEFAULT_TESTENV)~ variable. You can execute the default =testenv=
+   targets from the project directory by using the ~testenv-%~ prefix. If a
+   project contains multiple environments you can choose the =testenv= to start
+   in two ways:
+   1. Change directory to the desired =testenv= and run make targets from there.
+   2. Execute the =testenv= targets from the main project directory but passing
+      the path to the Makefile, like ~make -C testenvs/quick start~.
+
+   To access NSO via one of its northbound interfaces, like NETCONF or RESTCONF,
+   use the credentials =admin= / =NsoDocker1337=.
 
 ** Docker tags and prefixes
    Built images are tagged with the NSO version and "PNS" ("Pipeline NameSpace", when in a CI context, or "Pseudo NameSpace", when running locally, outside of CI), like ~$(NSO_VERSION)-$(PNS)~. For local builds, PNS is set to your username (modulo some mangling as some characters are forbidden in Docker image tags), e.g. =5.3-kll= (for username =kll=). In CI, PNS is set to the CI pipeline ID, like =5.3-12345=. The PNS part means we don't immediately overwrite the previously built images with the version tag like =5.3=, which might be included by other repositories. We don't want a development version to overwrite the released one.
 
-   Use the =tag-release= target to set the release tags on the image, e.g. go from =5.3-kll= to =5.3=. The CI configuration automatically does this for CI jobs run on the =master= branch. You might have to do it locally in case you wish to retag images so they can be tested with other repositories.
+   Use the =tag-release= target to set the release tags on the image, e.g. go from =5.3-kll= to =5.3=. The CI configuration automatically does this for CI jobs run on the default branch (like =main= or =master=). You might have to do it locally in case you wish to retag images so they can be tested with other repositories.
 
    In the =testenv=, the started containers have a name prefix to avoid collisions with other repositories that make use of the NID skeletons. The prefix is available in the Makefiles under the ~$(CNT_PREFIX)~ variable and is set to ~testenv-$(PROJECT_NAME)-$(NSO_VERSION)-$(PNS)~. It is also possible to override by manually setting the environment variable =CNT_PREFIX=.
 
@@ -149,7 +172,7 @@
   - =nidcommon.mk=: Makefile with definitions common across the NID skeletons
   - =nidpackage.mk=: Makefile with common targets for the NID package skeleton
   - =Makefile=: repository specific Makefile, while it comes with the skeleton, this is meant to be customized for each project
-  - =test/=: Directory containing test related files
+  - =testenvs/=: Directory containing the testenvs, with subdirectories for each testenv. While a "quick" testenv comes with the skeleton, this is meant to be customized for each project
   - =packages/=: Standard location for placing the NSO package itself
   - =test-packages/=: Standard location for placing NSO packages for testing. These are included in the =testnso= container that can be used to test the package but aren't included in the final output.
   - =includes/=: Standard location for placing manifests for including externally built packages
@@ -157,6 +180,40 @@
 
 ** Skeleton source location and updating the skeleton
    The authoritative origin for the standard form NID package skeleton is the =nso-docker= repository at [[https://gitlab.com/nso-developer/nso-docker/]], specifically in the directory =skeletons/package=. To upgrade to a later version of the skeleton, pull the files from that location and avoid touching the =Makefile= as it typically contains custom modifications. Be sure to include files starting with a dot (=.=).
+
+* Python dependencies & virtualenv
+  If you are using Python for your NSO package and depend on external Python packages, you should declare them in =src/requirements.txt=. The NSO in Docker build system will automatically build a Python virtualenv based on the =requirements.txt= file. The virtualenv is placed in =pyvenv/=.
+
+  At run time, NSO in Docker will automatically detect a Python virtualenv and if found, activate that virtualenv before starting the Python VM. The path to the virtualenv is hardcoded relative to the NSO package =${PKG_PATH}/pyvenv=.
+
+  Note that the each NSO package runs in its own Python VM and will not have access to the Python environment of another NSO package, for example:
+  - NSO package =A= depends on external Python package =foo=
+    - =foo= is installed in the pyvenv in package =A=
+  - NSO package =B= imports Python modules from package =A=
+  - NSO package =B= will not have access to the Python package =foo= in the pyvenv in package =A=
+  - =foo= will need to be installed in pyvenv of =A= as well, by specifying it in the =requirements.txt= file
+
+  =src/requirements-dev.txt= can be populated with build time dependencies. The NSO in Docker build system will automatically build a Python virtualenv in =pyvenv-dev/= based on the content of =src/requirements-dev.txt=. This is only activated in the build process and =pyvenv-dev/= is not included in the final artifact, reducing its size. It is highly recommended to let the build time dependencies be a superset of run time dependencies by including =requirements.txt= from =requirements-dev.txt=:
+  #+BEGIN_SRC text
+    -r requirements.txt
+  #+END_SRC
+
+* Python Remote Debugging
+  If your packages contain Python code, you can connect a remote debugger to individual Python VMs. The base NSO in Docker images include [[https://github.com/microsoft/debugpy]] which implements the Debug Adapter Protocol. Any compatible DAP client may attach the process on the exposed port (tcp/5678). In VSCode the =Python= extension available at [[https://marketplace.visualstudio.com/items?itemName=ms-python.python]] provides the functionality. The NSO containers started by the skeleton Makefiles will automatically expose the port on a high-numbered port assigned by the docker engine.
+
+  If you want to debug a Python package set the =DEBUGPY= environment variable to the NSO package name when starting the testenv. For example, if your package is called =testpy-package=, you start the environment with ~DEBUGPY=testpy-package make start~. If the =DEBUGPY= variable is set to an empty value or the package is not found at startup, debugging is disabled altogether. To start debugging use one of the provided DAP-client targets:
+  - =debug-vscode=: will create/update debug configuration in =.vscode/launch.json= as described at [[https://code.visualstudio.com/docs/python/debugging#_remote-script-debugging-with-ssh]]
+
+  Warning: at the moment debugging a Python package that uses the Python =multiprocessing= library, like the =bgworker= package, is not supported. Attempting to start the PythonVM in remote debug mode will prevent any background process from running until the remote debugger is attached.
+
+  NSO expects a service callback to complete in under 2 minutes (default setting). When stepping through the code with a debugger, execution is paused and if not stepped through fast enough, NSO will time out waiting for the callback. You can extend this timeout in the =java-vm= settings with the following configuration (the Java setting applies to Python callbacks as well):
+  #+BEGIN_SRC xml
+  <java-vm xmlns="http://tail-f.com/ns/ncs">
+    <service-transaction-timeout>600</service-transaction-timeout>
+  </java-vm>
+  #+END_SRC
+
+  Note: the value of the =DEBUGPY= variable specifies the Python VM name. Usually this is the name of the NSO package as defined in =package-meta-data.xml=. It may differ from the package directory name. If the name of the Python VM was overriden in =package-meta-data.xml= you must use the actual name.
 
 * Continuous mirroring
   In the NSO in Docker (NID) ecosystem, you are encouraged to mirror repositories that you use. If you found this repository outside of your own git hosting system, you should mirror it to your own git host for it to be built there by your own CI system.
