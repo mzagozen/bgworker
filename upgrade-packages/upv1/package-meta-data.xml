@@ -1,0 +1,6 @@
+<ncs-package xmlns="http://tail-f.com/ns/ncs-packages">
+  <name>upgrade-package</name>
+  <package-version>1.0</package-version>
+  <description>Test package testing package upgrades</description>
+  <ncs-min-version>5.3</ncs-min-version>
+</ncs-package>

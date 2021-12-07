@@ -1,0 +1,13 @@
+<ncs-package xmlns="http://tail-f.com/ns/ncs-packages">
+  <name>upgrade-package</name>
+  <package-version>2.0</package-version>
+  <description>Test package testing package upgrades</description>
+  <ncs-min-version>5.3</ncs-min-version>
+
+  <component>
+    <name>Slow Upgrade function</name>
+    <upgrade>
+      <python-class-name>up.main.SlowUpgrade</python-class-name>
+    </upgrade>
+  </component>
+</ncs-package>

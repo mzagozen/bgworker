@@ -200,3 +200,42 @@ test-counter-working:
 test-counter-stopped:
 	@echo "-- Verify counter is not being incremented"
 	diff <($(MAKE) runcmdJ CMD="show $(TEST_TBGW) counter" | awk '/^$(TEST_TBGW) counter/ { print $$3 }') <(sleep 5; $(MAKE) runcmdJ CMD="show $(TEST_TBGW) counter" | awk '/^$(TEST_TBGW) counter/ { print $$3 }')
+
+
+test-upgrade-load-v1:
+	rm -rf test-packages/up
+	cp -a upgrade-packages/upv1 test-packages/up
+	$(MAKE) clean-build
+
+test-upgrade-load-v2:
+	rm -rf test-packages/up
+	cp -a upgrade-packages/upv2 test-packages/up
+	$(MAKE) clean-build
+
+# Test that the bgworker does not run while NSO is doing schema upgrades. The
+# "up" package version 2 has a 10 second sleep, so we ensure that a) the upgrade
+# code has been run by checking that the whole test took more than 10 second and
+# b) that the background process indeed did not run by looking the python log
+# for the tell tale exceptions that happen when the bgworker tries to connect to
+# NSO which will reject the connection due to being in upgrade mode.
+# Quite hackish, but it works...
+test-upgrade:
+	@echo "-- Removing old package"
+	docker exec -t $(CNT_PREFIX)-nso bash -lc 'rm -rf /var/opt/ncs/packages/up'
+	$(MAKE) runcmdJ CMD="request packages reload force"
+	@echo "-- Loading version 1 of package"
+	$(MAKE) test-upgrade-load-v1
+	@echo "-- Getting rid of old log messages"
+	docker exec -t $(CNT_PREFIX)-nso bash -lc 'echo "" > /log/ncs-python-vm-test-bgworker.log'
+	@echo "-- Adding some data"
+	$(MAKE) runcmdJ CMD="configure\n set up a FOO val1 BAR\n commit"
+	TIME1=$$(date +"%s"); \
+	VAL1=$$($(MAKE) runcmdJ CMD="show $(TEST_TBGW) counter" | awk '/^$(TEST_TBGW) counter/ { print $$3 }' | tr -d '\r'); \
+	$(MAKE) test-upgrade-load-v2; \
+	TIME2=$$(date +"%s"); \
+	VAL2=$$($(MAKE) runcmdJ CMD="show $(TEST_TBGW) counter" | awk '/^$(TEST_TBGW) counter/ { print $$3 }' | tr -d '\r'); \
+	DIFF=$$(expr $$VAL2 - $$VAL1); \
+	TDIFF=$$(expr $$TIME2 - $$TIME1); \
+	if [ $$TDIFF -lt 10 ]; then echo "Not enough time ($$TDIFF) has elapsed, did upgrade code run?"; false; fi && \
+	if [ $$DIFF -gt 10 ]; then echo "Diff ($$DIFF) is larger than 10, how did that happen?"; false; fi
+	docker exec -t $(CNT_PREFIX)-nso bash -lc '! grep "node is in upgrade mode" /log/ncs-python-vm-test-bgworker.log'

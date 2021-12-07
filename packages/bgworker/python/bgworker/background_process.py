@@ -138,8 +138,8 @@ class Process(threading.Thread):
             self.config_subscriber.start()
 
         # start the HA event listener thread
-        self.ha_event_listener = HaEventListener(app=self.app, q=self.q)
-        self.ha_event_listener.start()
+        self.event_listener = EventListener(app=self.app, q=self.q)
+        self.event_listener.start()
 
         # start the logging QueueListener thread
         hdlrs = list(_get_handler_impls(self.app._logger))
@@ -156,6 +156,8 @@ class Process(threading.Thread):
         self.log_config_subscriber.start()
 
         self.worker: Optional[multiprocessing.context.SpawnProcess] = None
+
+        self.in_upgrade = None
 
         # Read initial configuration, using two separate transactions
         with ncs.maapi.Maapi() as m:
@@ -192,7 +194,9 @@ class Process(threading.Thread):
         while True:
             try:
                 if self.config_enabled:
-                    if not self.ha_enabled:
+                    if self.in_upgrade:
+                        should_run = False
+                    elif not self.ha_enabled:
                         should_run = True
                     else:
                         if self.ha_when == 'always' or self.ha_when == self.ha_mode:
@@ -213,6 +217,8 @@ class Process(threading.Thread):
                 else:
                     if not self.config_enabled:
                         self.log.info("Background worker is disabled")
+                    elif self.in_upgrade:
+                        self.log.info("Background worker disabled while NSO is in upgrade mode")
                     elif self.ha_enabled:
                         self.log.info(f"Background worker will not run when HA-when={self.ha_when} and HA-mode={self.ha_mode}")
 
@@ -237,6 +243,11 @@ class Process(threading.Thread):
                             self.config_enabled = v
                         elif k == "ha-mode":
                             self.ha_mode = v
+                        elif k == "upgrade":
+                            if v in ('commited', 'aborted'):
+                                self.in_upgrade = False
+                            else:
+                                self.in_upgrade = True
                         elif k == 'restart':
                             self.log.info("Restarting the background worker process")
                             self.worker_stop()
@@ -264,7 +275,7 @@ class Process(threading.Thread):
         """
         # stop the HA event listener
         self.log.debug("{}: stopping HA event listener".format(self.name))
-        self.ha_event_listener.stop()
+        self.event_listener.stop()
 
         # stop config CDB subscriber
         self.log.debug("{}: stopping config CDB subscriber".format(self.name))
@@ -446,20 +457,21 @@ class LogConfigSubscriber(object):
         self.q.put(("log-level", new_level))
 
 
-class HaEventListener(threading.Thread):
-    """HA Event Listener
-    HA events, like HA-mode transitions, are exposed over a notification API.
+class EventListener(threading.Thread):
+    """Event Listener for HA & upgrade events
+
+    The NSO notification API exposes various events. We are interested in the
+    HA events, like HA-mode transitions, and events related to a system upgrade.
     We listen on that and forward relevant messages over the queue to the
     supervisor which can act accordingly.
 
     We use a WaitableEvent rather than a threading.Event since the former
-    allows us to wait on it using a select loop. The HA events are received
-    over a socket which can also be waited upon using a select loop, thus
-    making it possible to wait for the two inputs we have using a single select
-    loop.
+    allows us to wait on it using a select loop. The events are received over a
+    socket which can also be waited upon using a select loop, thus making it
+    possible to wait for the two inputs we have using a single select loop.
     """
     def __init__(self, app, q):
-        super(HaEventListener, self).__init__()
+        super(EventListener, self).__init__()
         self.app = app
         self.log = app.log
         self.q = q
@@ -470,7 +482,7 @@ class HaEventListener(threading.Thread):
         self.app.add_running_thread(self.__class__.__name__ + ' (HA event listener)')
 
         self.log.info('run() HA event listener')
-        mask = events.NOTIF_HA_INFO
+        mask = events.NOTIF_HA_INFO + events.NOTIF_UPGRADE_EVENT
         event_socket = socket.socket()
         events.notifications_connect(event_socket, mask, ip='127.0.0.1', port=ncs.PORT)
         while True:
@@ -479,17 +491,29 @@ class HaEventListener(threading.Thread):
                 event_socket.close()
                 return
 
-            notification = events.read_notification(event_socket)
-            # Can this fail? Could we get a KeyError here? Afraid to catch it
-            # because I don't know what it could mean.
-            ha_notif_type = notification['hnot']['type']
+            event = events.read_notification(event_socket)
+            if event['type'] == events.NOTIF_UPGRADE_EVENT:
+                upgrade_event_map = {
+                    1: 'init-started',
+                    2: 'init-succeeded',
+                    3: 'performed',
+                    4: 'commited',
+                    5: 'aborted'
+                }
+                et = upgrade_event_map[event['upgrade']['event']]
+                self.q.put(('upgrade', et))
 
-            if ha_notif_type == events.HA_INFO_IS_MASTER:
-                self.q.put(('ha-mode', 'master'))
-            elif ha_notif_type == events.HA_INFO_IS_NONE:
-                self.q.put(('ha-mode', 'none'))
-            elif ha_notif_type == events.HA_INFO_SLAVE_INITIALIZED:
-                self.q.put(('ha-mode', 'slave'))
+            elif event['type'] == events.NOTIF_HA_INFO:
+                # Can this fail? Could we get a KeyError here? Afraid to catch it
+                # because I don't know what it could mean.
+                ha_notif_type = event['hnot']['type']
+
+                if ha_notif_type == events.HA_INFO_IS_MASTER:
+                    self.q.put(('ha-mode', 'master'))
+                elif ha_notif_type == events.HA_INFO_IS_NONE:
+                    self.q.put(('ha-mode', 'none'))
+                elif ha_notif_type == events.HA_INFO_SLAVE_INITIALIZED:
+                    self.q.put(('ha-mode', 'slave'))
 
     def stop(self):
         self.exit_flag.set()
