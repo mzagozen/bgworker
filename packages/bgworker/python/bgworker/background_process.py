@@ -157,7 +157,7 @@ class Process(threading.Thread):
 
         self.worker: Optional[multiprocessing.context.SpawnProcess] = None
 
-        self.in_upgrade = None
+        self.in_upgrade = False
 
         # Read initial configuration, using two separate transactions
         with ncs.maapi.Maapi() as m:
