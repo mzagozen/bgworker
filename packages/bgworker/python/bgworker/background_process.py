@@ -85,7 +85,7 @@ class LogReconfigurator(threading.Thread):
     def run(self):
         while True:
             k, v = self.q.get()
-            if k is 'exit':
+            if k == 'exit':
                 return
 
             self.log_root.setLevel(v)
