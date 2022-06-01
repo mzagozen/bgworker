@@ -333,10 +333,18 @@ class Process(threading.Thread):
         if self.worker is None:
             self.log.info("{}: asked to stop worker but background worker does not exist".format(self.name))
             return
-        if self.worker.is_alive():
-            self.log.info("{}: stopping the background worker process".format(self.name))
-            self.worker.terminate()
-        self.worker.join(timeout=1)
+        if not self.worker.is_alive():
+            self.log.info("{}: asked to stop worker but background worker is not running".format(self.name))
+            return
+        self.log.info("{}: stopping the background worker process".format(self.name))
+        self.worker.terminate()
+        try:
+            self.worker.join(timeout=1)
+        except AssertionError as exc:
+            if str(exc) == "can only join a started process":
+                pass
+            else:
+                raise exc
         if self.worker.is_alive():
             self.log.error("{}: worker not terminated on time, alive: {}  process: {}".format(self, self.worker.is_alive(), self.worker))
 
@@ -475,7 +483,7 @@ class EventListener(threading.Thread):
         self.app = app
         self.log = app.log
         self.q = q
-        self.log.info('{} supervisor: init'.format(self))
+        self.log.info('{} EventListener: init'.format(self))
         self.exit_flag = WaitableEvent()
 
     def run(self):
