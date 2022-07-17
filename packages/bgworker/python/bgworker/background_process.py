@@ -111,7 +111,7 @@ class Process(threading.Thread):
     # the annotaton right
     mp_ctx: ClassVar[multiprocessing.context.SpawnContext] = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
 
-    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when='master', backoff_timer=1):
+    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when='master', backoff_timer=1, run_during_upgrade=False):
         super(Process, self).__init__()
         self.app = app
         self.bg_fun = bg_fun
@@ -120,6 +120,7 @@ class Process(threading.Thread):
         self.ha_when = ha_when
         self.backoff_timer = backoff_timer
         self.parent_pipe = None
+        self.run_during_upgrade = run_during_upgrade
 
         self.log = app.log
         self.name = "{}.{}".format(self.app.__class__.__module__,
@@ -194,7 +195,7 @@ class Process(threading.Thread):
         while True:
             try:
                 if self.config_enabled:
-                    if self.in_upgrade:
+                    if self.in_upgrade and not self.run_during_upgrade:
                         should_run = False
                     elif not self.ha_enabled:
                         should_run = True
@@ -217,7 +218,7 @@ class Process(threading.Thread):
                 else:
                     if not self.config_enabled:
                         self.log.info("Background worker is disabled")
-                    elif self.in_upgrade:
+                    elif self.in_upgrade and not self.run_during_upgrade:
                         self.log.info("Background worker disabled while NSO is in upgrade mode")
                     elif self.ha_enabled:
                         self.log.info(f"Background worker will not run when HA-when={self.ha_when} and HA-mode={self.ha_mode}")
