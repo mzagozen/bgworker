@@ -1,3 +1,4 @@
+include ../../nidvars.mk
 include ../../nidcommon.mk
 
 # The name of the current test environment is the final directory name
@@ -62,7 +63,7 @@ debug-vscode:
 rebuild:
 	for NSO in $$(docker ps --format '{{.Names}}' --filter label=com.cisco.nso.testenv.name=$(CNT_PREFIX) --filter label=com.cisco.nso.testenv.type=nso); do \
 		echo "-- Rebuilding for NSO: $${NSO}"; \
-		docker run -t --rm -v $(PROJECT_DIR):/src --volumes-from $${NSO} --network=container:$${NSO} -e NSO=$${NSO} -e PACKAGE_RELOAD=$(PACKAGE_RELOAD) -e SKIP_LINT=$(SKIP_LINT) -e PKG_FILE=$(IMAGE_PATH)$(PROJECT_NAME)/package:$(DOCKER_TAG) $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) /src/nid/testenv-build; \
+		docker run -t --rm -v $(PROJECT_DIR):/src --volumes-from $${NSO} -v $(CNT_PREFIX)-pip-cache:/root/.cache/pip --network=container:$${NSO} -e NSO=$${NSO} -e PACKAGE_RELOAD=$(PACKAGE_RELOAD) -e SKIP_LINT=$(SKIP_LINT) -e PKG_FILE=$(IMAGE_PATH)$(PROJECT_NAME)/package:$(DOCKER_TAG) $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) /src/nid/testenv-build; \
 	done
 
 # clean-rebuild - clean and rebuild from scratch
@@ -81,7 +82,7 @@ clean-rebuild:
 		docker run -t --rm --volumes-from $${NSO} $(IMAGE_PATH)$(PROJECT_NAME)/build:$(DOCKER_TAG) cp -a /includes/. /var/opt/ncs/packages/; \
 	done
 	@echo "-- Done cleaning, rebuilding with forced package reload..."
-	$(MAKE) build PACKAGE_RELOAD="true"
+	$(MAKE) rebuild PACKAGE_RELOAD="true"
 
 # stop - stop the testenv
 # This finds the currently running containers that are part of our testenv based
@@ -108,16 +109,16 @@ runcmdC runcmdJ:
 loadconf:
 	@if [ -z "$(FILE)" ]; then echo "FILE variable must be set"; false; fi
 	@echo "Loading configuration $(FILE)"
-	@docker exec -t $(CNT_PREFIX)-nso bash -lc "mkdir -p test/$(shell echo $(FILE) | xargs dirname)"
-	@docker cp $(FILE) $(CNT_PREFIX)-nso:test/$(FILE)
-	@$(MAKE) runcmdJ CMD="configure\nload merge test/$(FILE)\ncommit"
+	@docker exec -t $(CNT_PREFIX)-nso$(NSO) bash -lc "mkdir -p /tmp/$(shell echo $(FILE) | xargs dirname)"
+	@docker cp $(FILE) $(CNT_PREFIX)-nso$(NSO):/tmp/$(FILE)
+	@$(MAKE) runcmdJ CMD="configure\nload merge /tmp/$(FILE)\ncommit"
 
 saveconfxml:
 	@if [ -z "$(FILE)" ]; then echo "FILE variable must be set"; false; fi
 	@echo "Saving configuration to $(FILE)"
-	docker exec -t $(CNT_PREFIX)-nso bash -lc "mkdir -p test/$(shell echo $(FILE) | xargs dirname)"
-	@$(MAKE) runcmdJ CMD="show configuration $(CONFPATH) | display xml | save test/$(FILE)"
-	@docker cp $(CNT_PREFIX)-nso:test/$(FILE) $(FILE)
+	docker exec -t $(CNT_PREFIX)-nso$(NSO) bash -lc "mkdir -p /tmp/$(shell echo $(FILE) | xargs dirname)"
+	@$(MAKE) runcmdJ CMD="show configuration $(CONFPATH) | display xml | save /tmp/$(FILE)"
+	@docker cp $(CNT_PREFIX)-nso$(NSO):/tmp/$(FILE) $(FILE)
 
 # Wait for all NSO instances in testenv to start up, as determined by `ncs
 # --wait-started`, or display the docker log for the first failed NSO instance.
@@ -200,33 +201,37 @@ check-logs:
 dev-shell:
 	docker run -it --rm -v $(PROJECT_DIR):/src --volumes-from $(CNT_PREFIX)-nso$(NSO) --network container:$(CNT_PREFIX)-nso$(NSO) $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION)
 
+# Wait for all containers in the testenv (as found via the testenv label) to
+# become healthy! If a container has exited, we exit immediately.
+# The implicit assumption is that all containers as part of the testenv should
+# be running. If a temporary container is used, i.e. its normal life cycle is
+# that it is started, run shortly and then exits, it must also be removed!
 wait-healthy:
-	@echo "Waiting (up to 900 seconds) for vrnetlab and NCS containers to become healthy"
-	@OLD_COUNT=0; for I in $$(seq 1 900); do \
-		if [ "$$(docker ps -f name=^/$(CNT_PREFIX)-nso\$$ | tail -n +2 | wc -l)" -ne 1 ]; then echo -e "\e[31m$(CNT_PREFIX)-nso not running. Something in start must have gone bad (failed to load package etc). You should debug (check 'docker logs $(CNT_PREFIX)-nso') and restart\e[0m"; exit 1; fi; \
-		STOPPED=$$(docker ps -a -f name=$(CNT_PREFIX) | grep Exited); \
-		if [ -n "$$STOPPED" ]; then \
-			echo -e "\e[31m===  $${SECONDS}s elapsed - Container died"; \
-	    echo -e "$$STOPPED \\e[0m"; \
+	@echo "Waiting (up to 900 seconds) for testenv container(s) to become healthy"
+	@OLD_COUNT=0; SECONDS=0; for I in $$(seq 1 900); do \
+		STOPPED=$$(docker ps -a --filter label=com.cisco.nso.testenv.name=$(CNT_PREFIX) | grep "Exited"); \
+		if [ -n "$${STOPPED}" ]; then \
+			echo "\e[31m===  $${SECONDS}s elapsed - Container(s) unexpectedly exited"; \
+			echo "$${STOPPED} \\e[0m"; \
 			exit 1; \
 		fi; \
-		COUNT=$$(docker ps -f name=$(CNT_PREFIX) | egrep "(unhealthy|health: starting)" | wc -l); \
-		if [ $$COUNT -gt 0 ]; then  \
-			if [ $$OLD_COUNT -ne $$COUNT ];\
+		COUNT=$$(docker ps --filter label=com.cisco.nso.testenv.name=$(CNT_PREFIX) | egrep "(unhealthy|health: starting)" | wc -l); \
+		if [ $${COUNT} -gt 0 ]; then  \
+			if [ $${OLD_COUNT} -ne $${COUNT} ];\
 			then \
-				echo -e "\e[31m===  $${SECONDS}s elapsed - Found unhealthy/starting ($${COUNT}) containers";\
-				docker ps -f name=$(CNT_PREFIX) | egrep "(unhealthy|health: starting)" | awk '{ print $$(NF) }';\
-				echo -e "Checking again every 1 second, no more messages until changes detected\\e[0m"; \
+				echo "\e[31m===  $${SECONDS}s elapsed - Found unhealthy/starting ($${COUNT}) containers";\
+				docker ps --filter label=com.cisco.nso.testenv.name=$(CNT_PREFIX) | egrep "(unhealthy|health: starting)" | awk '{ print $$(NF) }';\
+				echo "Checking again every 1 second, no more messages until changes detected\\e[0m"; \
 			fi;\
 			sleep 1; \
-			OLD_COUNT=$$COUNT;\
+			OLD_COUNT=$${COUNT};\
 			continue; \
 		else \
-			echo -e "\e[32m=== $${SECONDS}s elapsed - Did not find any unhealthy containers, all is good.\e[0m"; \
+			echo "\e[32m=== $${SECONDS}s elapsed - Did not find any unhealthy containers, all is good.\e[0m"; \
 			exit 0; \
 		fi ;\
 	done; \
-	echo -e "\e[31m===  $${SECONDS}s elapsed - Found unhealthy/starting ($${COUNT}) containers";\
-	docker ps -f name=$(CNT_PREFIX) | egrep "(unhealthy|health: starting)" | awk '{ print $$(NF) }';\
-	echo -e "\e[0m"; \
+	echo "\e[31m===  $${SECONDS}s elapsed - Found unhealthy/starting ($${COUNT}) containers";\
+	docker ps --filter label=com.cisco.nso.testenv.name=$(CNT_PREFIX) | egrep "(unhealthy|health: starting)" | awk '{ print $$(NF) }';\
+	echo "\e[0m"; \
 	exit 1

@@ -3,4 +3,3 @@ Dockerfile
 .pylint.d/
 *.fxs
 tmp/
-test-packages/up
