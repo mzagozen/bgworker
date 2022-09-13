@@ -74,7 +74,7 @@ ifeq ($(NSO_VERSION),)
 $(error "ERROR: variable NSO_VERSION must be set, for example to '5.2.1' to build based on NSO version 5.2.1")
 endif
 NSO_VERSION_MAJOR=$(word 1,$(subst ., ,$(NSO_VERSION)))
-NSO_VERSION_MINOR=$(word 2,$(subst ., ,$(NSO_VERSION)))
+NSO_VERSION_MINOR=$(word 2,$(subst ., ,$(subst _, ,$(NSO_VERSION))))
 
 # Determine our project name, either from CI_PROJECT_NAME which is normally set
 # by GitLab CI or by looking at the name of our directory (that we are in).
@@ -120,12 +120,29 @@ export IMAGE_PATH?=$(call lc,$(CI_REGISTRY)/$(CI_PROJECT_NAMESPACE)/)
 export PKG_PATH?=$(call lc,$(CI_REGISTRY)/$(CI_PROJECT_NAMESPACE)/)
 endif
 
+# If we are not on x86_64, use --platform arg to Docker to enable emulation of
+# x86 for the container. NSO is only compiled for x86_64, so we can never run
+# without emulation.
+ifneq ($(shell uname -m),x86_64)
+DOCKER_PLATFORM_ARG ?= --platform=linux/amd64
+endif
+
+DOCKER_BUILD_PROXY_ARGS ?= --build-arg http_proxy --build-arg https_proxy --build-arg no_proxy
+
+
+DOCKER_BUILD_ARGS+= $(DOCKER_PLATFORM_ARG) $(DOCKER_BUILD_PROXY_ARGS)
+DOCKER_BUILD_ARGS+= --build-arg NSO_IMAGE_PATH=$(NSO_IMAGE_PATH)
+DOCKER_BUILD_ARGS+= --build-arg NSO_VERSION=$(NSO_VERSION)
+DOCKER_BUILD_ARGS+= --build-arg PKG_FILE=$(IMAGE_PATH)$(PROJECT_NAME)/package:$(DOCKER_TAG)
+DOCKER_BUILD_ARGS+= --progress=plain
+
 # DOCKER_ARGS contains arguments to 'docker run' for any type of container in
 # the test environment.
 # DOCKER_NSO_ARGS contains additional arguments specific to an NSO container.
 # This includes exposing tcp/5678 for Python Remote Debugging using debugpy.
 DOCKER_LABEL_ARG?=--label com.cisco.nso.testenv.name=$(CNT_PREFIX)
-DOCKER_ARGS=--network $(CNT_PREFIX) $(DOCKER_LABEL_ARG)
+DOCKER_ARGS+=$(DOCKER_PLATFORM_ARG)
+DOCKER_ARGS+=--network $(CNT_PREFIX) $(DOCKER_LABEL_ARG)
 # DEBUGPY?=$(PROJECT_NAME)
 DOCKER_NSO_ARGS=$(DOCKER_ARGS) --label com.cisco.nso.testenv.type=nso --volume /var/opt/ncs/packages -e DEBUGPY=$(DEBUGPY) --expose 5678 --publish-all
 
@@ -188,4 +205,5 @@ ensure-fresh-nid-available:
 							echo "$(NSO_IMAGE_PATH)" | grep "/$$" >/dev/null || echo "HINT: did you forget a trailing '/' in NSO_IMAGE_PATH?"; \
 							echo "HINT: Is NSO_IMAGE_PATH correctly set? Set NSO_IMAGE_PATH to the registry URL of the nso-docker repo, for example 'registry.gitlab.com/nso-developer/nso-docker/'"; \
 							false); \
+				docker pull $(NSO_IMAGE_PATH)cisco-nso-dev:$(NSO_VERSION) 2>/dev/null; \
 			fi)
