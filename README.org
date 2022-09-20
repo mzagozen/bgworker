@@ -15,8 +15,8 @@ to handle, such as:
  - background worker process dying (will restart it)
  - configuration changes - enabling/disabling of the background worker
  - HA events - only run background process when in specified HA mode
-   - per default runs when HA is disabled or HA mode = =master=
-   - can also be set to run when in HA mode =none= or =slave=
+   - per default runs when HA is disabled or HA mode = =primary=/=master=
+   - can also be set to run when in HA mode =none= or =secondary=/=slave=
    - or set to =always= to always run regardless of current HA mode
 
 The example code in this package does not demonstrate all the abilities of the
@@ -30,8 +30,8 @@ request from NCS. The reaction to configuration changes can be tested by using
 the ncs_cli and disabling the bgworker by going into `configure` mode and doing
 `set bgworker disabled` followed by `commit`. Finally, HA can be tested by
 loading whatever HAFW package you want, enabling HA in NCS and using the HAFW
-package functionality to switch to master mode or away from master mode, which
-should then lead to starting or stopping the background worker process
+package functionality to switch to primary/master mode or away from primary/master
+mode, which should then lead to starting or stopping the background worker process
 respectively.
 
 This code is written for Python 3. Python 2 is dead and you should stop using
