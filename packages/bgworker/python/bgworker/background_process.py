@@ -9,7 +9,7 @@ We react to:
  - background worker process dying (will restart it)
  - NCS package events, like redeploy
  - configuration changes (disable the background worker)
- - HA events (if we are a slave)
+ - HA events (if we are a secondary/slave)
 """
 import logging
 import logging.handlers
@@ -29,6 +29,16 @@ try:
 except ImportError:
     from ncs.experimental import Subscriber # type: ignore
 
+try:
+    _HA_INFO_IS_PRIMARY = events.HA_INFO_IS_PRIMARY
+    _HA_INFO_SECONDARY_INITIALIZED = events.HA_INFO_SECONDARY_INITIALIZED
+    _HA_PRIMARY_NAME = 'primary'
+    _HA_SECONDARY_NAME = 'secondary'
+except AttributeError:
+    _HA_INFO_IS_PRIMARY = events.HA_INFO_IS_MASTER
+    _HA_INFO_SECONDARY_INITIALIZED = events.HA_INFO_SLAVE_INITIALIZED
+    _HA_PRIMARY_NAME = 'master'
+    _HA_SECONDARY_NAME = 'slave'
 
 def _get_handler_impls(logger: logging.Logger) -> Iterable[logging.Handler]:
     """For a given Logger instance, find the registered handlers.
@@ -111,7 +121,7 @@ class Process(threading.Thread):
     # the annotaton right
     mp_ctx: ClassVar[multiprocessing.context.SpawnContext] = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
 
-    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when='master', backoff_timer=1, run_during_upgrade=False):
+    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when=_HA_PRIMARY_NAME, backoff_timer=1, run_during_upgrade=False):
         super(Process, self).__init__()
         self.app = app
         self.bg_fun = bg_fun
@@ -517,12 +527,12 @@ class EventListener(threading.Thread):
                 # because I don't know what it could mean.
                 ha_notif_type = event['hnot']['type']
 
-                if ha_notif_type == events.HA_INFO_IS_MASTER:
-                    self.q.put(('ha-mode', 'master'))
+                if ha_notif_type == _HA_INFO_IS_PRIMARY:
+                    self.q.put(('ha-mode', _HA_PRIMARY_NAME))
                 elif ha_notif_type == events.HA_INFO_IS_NONE:
                     self.q.put(('ha-mode', 'none'))
-                elif ha_notif_type == events.HA_INFO_SLAVE_INITIALIZED:
-                    self.q.put(('ha-mode', 'slave'))
+                elif ha_notif_type == _HA_INFO_SECONDARY_INITIALIZED:
+                    self.q.put(('ha-mode', _HA_SECONDARY_NAME))
 
     def stop(self):
         self.exit_flag.set()

@@ -51,7 +51,7 @@ module tbgw {
     }
   }
 
-  container tbgw-ha-slave {
+  container tbgw-ha-secondary {
     leaf enabled {
       type boolean;
       default true;
