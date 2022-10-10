@@ -5,12 +5,9 @@
 # - tbgw-ha-always: should always run, even when HA-mode=none
 # - tbgw-ha-secondary: runs when HA-mode=secondary/slave
 import logging
-import random
-import sys
 import time
 
 import ncs
-from ncs.application import Service
 
 from bgworker import background_process
 
