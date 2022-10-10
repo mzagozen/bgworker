@@ -43,8 +43,15 @@ test:
 # tbgw-ha-secondary
 TEST_TBGW?=tbgw
 
-# Tests go in test
-test:
+ifeq ($(shell test "$(NSO_VERSION_MAJOR)" -ge 6; echo $$?),0)
+HA_PRIMARY=primary
+HA_SECONDARY=secondary
+HA_STATE=tfnm2:ha
+else
+HA_STATE=ha
+HA_PRIMARY=master
+HA_SECONDARY=slave
+endif
 
 test-ha:
 ifeq ($(shell test "$(NSO_VERSION_MAJOR)" -lt 5  -o  \
@@ -52,15 +59,10 @@ ifeq ($(shell test "$(NSO_VERSION_MAJOR)" -lt 5  -o  \
                    "$(NSO_VERSION_MINOR)" -lt 4  \
                    &&  printf "true"), true)
 	@echo "Skipping HA tests on NSO version < 5.4"
-else ifeq ($(shell test "$(NSO_VERSION_MAJOR)" -lt 6  \
-                   &&  printf "true"), true)
-	$(MAKE) test-ha-none HA_PRIMARY=master HA_SECONDARY=slave HA_STATE=ha
-	$(MAKE) test-ha-primary HA_PRIMARY=master HA_SECONDARY=slave HA_STATE=ha
-	$(MAKE) test-ha-secondary HA_PRIMARY=master HA_SECONDARY=slave HA_STATE=ha
 else
-	$(MAKE) test-ha-none HA_PRIMARY=primary HA_SECONDARY=secondary HA_STATE=tfnm2:ha
-	$(MAKE) test-ha-primary HA_PRIMARY=primary HA_SECONDARY=secondary HA_STATE=tfnm2:ha
-	$(MAKE) test-ha-secondary HA_PRIMARY=primary HA_SECONDARY=secondary HA_STATE=tfnm2:ha
+	$(MAKE) test-ha-none
+	$(MAKE) test-ha-primary
+	$(MAKE) test-ha-secondary
 endif
 
 test-working:
@@ -137,15 +139,15 @@ test-ha-none:
 	$(MAKE) test-counter-stopped
 	@echo "-- The tbgw-ha-always instance should be running though"
 	$(MAKE) test-counter-working TEST_TBGW=tbgw-ha-always
-	@echo "-- The tbgw-ha-$(HA_SECONDARY) instance should NOT run"
-	$(MAKE) test-counter-stopped TEST_TBGW=tbgw-ha-$(HA_SECONDARY)
-	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=$(HA_PRIMARY) and HA-mode=none"
-	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=$(HA_SECONDARY) and HA-mode=none"
+	@echo "-- The tbgw-ha-secondary instance should NOT run"
+	$(MAKE) test-counter-stopped TEST_TBGW=tbgw-ha-secondary
+	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=primary and HA-mode=none"
+	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=secondary and HA-mode=none"
 	-docker rm -f $(CNT_PREFIX)-nso$@
 
 test-ha-primary: export NSO=$@
 test-ha-primary:
-	@echo -e "\n== Ensure bgworker behavior when in HA-mode = $(HA_PRIMARY)"
+	@echo -e "\n== Ensure bgworker behavior when in HA-mode = primary"
 	docker network inspect $(CNT_PREFIX) >/dev/null 2>&1 || docker network create $(CNT_PREFIX)
 	-docker rm -f $(CNT_PREFIX)-nso$@
 	docker run -td --name $(CNT_PREFIX)-nso$@ $(DOCKER_NSO_ARGS) -e ADMIN_PASSWORD=NsoDocker1337 -e HA_ENABLE=true $${NSO_EXTRA_ARGS} $(IMAGE_PATH)$(PROJECT_NAME)/testnso:$(DOCKER_TAG)
@@ -160,41 +162,41 @@ test-ha-primary:
 	sleep 10
 	@echo "-- The tbgw-ha-always instance should be running too"
 	$(MAKE) test-counter-working TEST_TBGW=tbgw-ha-always
-	@echo "-- The tbgw-ha-$(HA_SECONDARY) instance should NOT run"
-	$(MAKE) test-counter-stopped TEST_TBGW=tbgw-ha-$(HA_SECONDARY)
-	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=$(HA_SECONDARY) and HA-mode=$(HA_PRIMARY)"
+	@echo "-- The tbgw-ha-secondary instance should NOT run"
+	$(MAKE) test-counter-stopped TEST_TBGW=tbgw-ha-secondary
+	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=secondary and HA-mode=primary"
 	-docker rm -f $(CNT_PREFIX)-nso$@
 
 
-HA_PRIMARY_ADDRESS=$$(docker inspect --format '{{range $$p, $$conf := .NetworkSettings.Networks}}{{(index $$conf).IPAddress}}{{end}}' $(CNT_PREFIX)-nso$@$(HA_PRIMARY) | head -n1 | cat)
+HA_PRIMARY_ADDRESS=$$(docker inspect --format '{{range $$p, $$conf := .NetworkSettings.Networks}}{{(index $$conf).IPAddress}}{{end}}' $(CNT_PREFIX)-nso$@primary | head -n1 | cat)
 test-ha-secondary: export NSO=$@
 test-ha-secondary:
-	@echo -e "\n== Ensure bgworker behavior when in HA-mode = $(HA_SECONDARY)"
+	@echo -e "\n== Ensure bgworker behavior when in HA-mode = secondary"
 	docker network inspect $(CNT_PREFIX) >/dev/null 2>&1 || docker network create $(CNT_PREFIX)
 	-docker rm -f $(CNT_PREFIX)-nso$@
-	-docker rm -f $(CNT_PREFIX)-nso$@$(HA_PRIMARY)
+	-docker rm -f $(CNT_PREFIX)-nso$@primary
 	docker run -td --name $(CNT_PREFIX)-nso$@ $(DOCKER_NSO_ARGS) -e ADMIN_PASSWORD=NsoDocker1337 -e HA_ENABLE=true $${NSO_EXTRA_ARGS} $(IMAGE_PATH)$(PROJECT_NAME)/testnso:$(DOCKER_TAG)
-	docker run -td --name $(CNT_PREFIX)-nso$@$(HA_PRIMARY) $(DOCKER_NSO_ARGS) -e ADMIN_PASSWORD=NsoDocker1337 -e HA_ENABLE=true $${NSO_EXTRA_ARGS} $(IMAGE_PATH)$(PROJECT_NAME)/testnso:$(DOCKER_TAG)
-	docker exec -t $(CNT_PREFIX)-nso$@$(HA_PRIMARY) bash -lc 'ncs --wait-started 600'
-	$(MAKE) runcmdJ NSO=$@$(HA_PRIMARY) CMD="configure\nedit high-availability\nset token ohsosecret\nset ha-node $(HA_PRIMARY) address $(HA_PRIMARY_ADDRESS) nominal-role $(HA_PRIMARY)\ncommit"
-	$(MAKE) runcmdJ NSO=$@$(HA_PRIMARY) CMD="request high-availability enable"
-	$(MAKE) runcmdJ NSO=$@$(HA_PRIMARY) CMD="request high-availability be-$(HA_PRIMARY)"
-	$(MAKE) runcmdJ NSO=$@$(HA_PRIMARY) CMD="show ncs-state $(HA_STATE)"
+	docker run -td --name $(CNT_PREFIX)-nso$@primary $(DOCKER_NSO_ARGS) -e ADMIN_PASSWORD=NsoDocker1337 -e HA_ENABLE=true $${NSO_EXTRA_ARGS} $(IMAGE_PATH)$(PROJECT_NAME)/testnso:$(DOCKER_TAG)
+	docker exec -t $(CNT_PREFIX)-nso$@primary bash -lc 'ncs --wait-started 600'
+	$(MAKE) runcmdJ NSO=$@primary CMD="configure\nedit high-availability\nset token ohsosecret\nset ha-node primary address $(HA_PRIMARY_ADDRESS) nominal-role $(HA_PRIMARY)\ncommit"
+	$(MAKE) runcmdJ NSO=$@primary CMD="request high-availability enable"
+	$(MAKE) runcmdJ NSO=$@primary CMD="request high-availability be-$(HA_PRIMARY)"
+	$(MAKE) runcmdJ NSO=$@primary CMD="show ncs-state $(HA_STATE)"
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'ncs --wait-started 600'
 	$(MAKE) runcmdJ NSO=$@ CMD="show ncs-state $(HA_STATE)"
-	$(MAKE) runcmdJ NSO=$@ CMD="configure\nedit high-availability\nset token ohsosecret\nset ha-node $(HA_SECONDARY) address 127.0.0.1 nominal-role $(HA_SECONDARY)\nset ha-node $(HA_PRIMARY) address $(HA_PRIMARY_ADDRESS) nominal-role $(HA_PRIMARY)\ncommit"
+	$(MAKE) runcmdJ NSO=$@ CMD="configure\nedit high-availability\nset token ohsosecret\nset ha-node secondary address 127.0.0.1 nominal-role $(HA_SECONDARY)\nset ha-node primary address $(HA_PRIMARY_ADDRESS) nominal-role $(HA_PRIMARY)\ncommit"
 	$(MAKE) runcmdJ NSO=$@ CMD="request high-availability enable"
-	$(MAKE) runcmdJ NSO=$@ CMD="request high-availability be-$(HA_SECONDARY)-to node $(HA_PRIMARY)"
+	$(MAKE) runcmdJ NSO=$@ CMD="request high-availability be-$(HA_SECONDARY)-to node primary"
 	$(MAKE) runcmdJ NSO=$@ CMD="show ncs-state $(HA_STATE)"
-	@echo "-- Give NSO some time to become $(HA_SECONDARY) and run tbgw + error out"
+	@echo "-- Give NSO some time to become secondary and run tbgw + error out"
 	sleep 10
 	$(MAKE) runcmdJ NSO=$@ CMD="show ncs-state $(HA_STATE)" | grep "ncs-state $(HA_STATE) mode $(HA_SECONDARY)"
-	@echo "-- Expect to see errors in log since we are in read-only mode ($(HA_SECONDARY)) and thus, trying to update counter results in error"
+	@echo "-- Expect to see errors in log since we are in read-only mode (secondary) and thus, trying to update counter results in error"
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep -A30 "TBGW starting on YANG: tbgw-ha-always" | grep "Unhandled error in test_bgwork"
 	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep -A30 "TBGW starting on YANG: tbgw-ha-secondary" | grep "Unhandled error in test_bgwork"
-	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=$(HA_PRIMARY) and HA-mode=$(HA_SECONDARY)"
+	docker exec -t $(CNT_PREFIX)-nso$@ bash -lc 'cat /log/ncs-python-vm-test-bgworker.log' | grep "Background worker will not run when HA-when=primary and HA-mode=secondary"
 	-docker rm -f $(CNT_PREFIX)-nso$@
-	-docker rm -f $(CNT_PREFIX)-nso$@$(HA_PRIMARY)
+	-docker rm -f $(CNT_PREFIX)-nso$@primary
 
 test-counter-working:
 	@echo "-- Verify counter is being incremented"
