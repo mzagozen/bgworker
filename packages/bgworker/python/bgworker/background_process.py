@@ -11,6 +11,7 @@ We react to:
  - configuration changes (disable the background worker)
  - HA events (if we are a secondary/slave)
 """
+import enum
 import logging
 import logging.handlers
 import multiprocessing
@@ -24,21 +25,30 @@ from typing import Any, Callable, ClassVar, Iterable, Optional, Tuple, Union, ca
 
 from _ncs import events
 import ncs
+
 try:
     from ncs.cdb import Subscriber          # type: ignore
 except ImportError:
     from ncs.experimental import Subscriber # type: ignore
 
+
+# NSO 6.0 renamed the HA master and slave roles to primary and secondary, and
+# also changed the data models for operational data and HA actions to match.
+# The code in bgworker uses the new terms and is backwards compatible - it will
+# run on NSO versions older than 6.0 with "incorrect" role names.
+class HaWhen(enum.Enum):
+    PRIMARY = 'primary'
+    SECONDARY = 'secondary'
+    ALWAYS = 'always'
 try:
     _HA_INFO_IS_PRIMARY = events.HA_INFO_IS_PRIMARY
     _HA_INFO_SECONDARY_INITIALIZED = events.HA_INFO_SECONDARY_INITIALIZED
-    _HA_PRIMARY_NAME = 'primary'
-    _HA_SECONDARY_NAME = 'secondary'
+    _TFNM_PREFIX = 'tfnm2'
 except AttributeError:
     _HA_INFO_IS_PRIMARY = events.HA_INFO_IS_MASTER
     _HA_INFO_SECONDARY_INITIALIZED = events.HA_INFO_SLAVE_INITIALIZED
-    _HA_PRIMARY_NAME = 'master'
-    _HA_SECONDARY_NAME = 'slave'
+    _TFNM_PREFIX = 'tfnm'
+
 
 def _get_handler_impls(logger: logging.Logger) -> Iterable[logging.Handler]:
     """For a given Logger instance, find the registered handlers.
@@ -121,7 +131,7 @@ class Process(threading.Thread):
     # the annotaton right
     mp_ctx: ClassVar[multiprocessing.context.SpawnContext] = cast(multiprocessing.context.SpawnContext, multiprocessing.get_context('spawn'))
 
-    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when=_HA_PRIMARY_NAME, backoff_timer=1, run_during_upgrade=False):
+    def __init__(self, app, bg_fun: Callable[..., Any], bg_fun_args: Optional[Tuple[Any, ...]] = None, config_path=None, ha_when: HaWhen = HaWhen.PRIMARY, backoff_timer=1, run_during_upgrade=False):
         super(Process, self).__init__()
         self.app = app
         self.bg_fun = bg_fun
@@ -187,15 +197,21 @@ class Process(threading.Thread):
                 # we don't want to incur any unnecessary locks
                 with m.start_read_trans(db=ncs.OPERATIONAL) as oper_t_read:
                     # check if HA is enabled
-                    if oper_t_read.exists("/tfnm:ncs-state/tfnm:ha"):
+                    if oper_t_read.exists(f"/tfnm:ncs-state/{_TFNM_PREFIX}:ha"):
                         self.ha_enabled = True
                     else:
                         self.ha_enabled = False
 
                     # determine HA state if HA is enabled
                     if self.ha_enabled:
-                        ha_mode = str(ncs.maagic.get_node(oper_t_read, '/tfnm:ncs-state/tfnm:ha/tfnm:mode'))
-                        self.ha_mode = ha_mode
+                        ha_mode = str(ncs.maagic.get_node(oper_t_read, f'/tfnm:ncs-state/{_TFNM_PREFIX}:ha/{_TFNM_PREFIX}:mode'))
+                        # always use primary/secondary names, makes the internals and logging consistent with input configuration
+                        if ha_mode == 'master':
+                            self.ha_mode = 'primary'
+                        elif ha_mode == 'slave':
+                            self.ha_mode = 'secondary'
+                        else:
+                            self.ha_mode = ha_mode
 
 
     def run(self):
@@ -210,7 +226,7 @@ class Process(threading.Thread):
                     elif not self.ha_enabled:
                         should_run = True
                     else:
-                        if self.ha_when == 'always' or self.ha_when == self.ha_mode:
+                        if self.ha_when == HaWhen.ALWAYS or self.ha_when.value == self.ha_mode:
                             should_run = True
                         else:
                             should_run = False
@@ -231,7 +247,7 @@ class Process(threading.Thread):
                     elif self.in_upgrade and not self.run_during_upgrade:
                         self.log.info("Background worker disabled while NSO is in upgrade mode")
                     elif self.ha_enabled:
-                        self.log.info(f"Background worker will not run when HA-when={self.ha_when} and HA-mode={self.ha_mode}")
+                        self.log.info(f"Background worker will not run when HA-when={self.ha_when.value} and HA-mode={self.ha_mode}")
 
                     if self.worker is not None and self.worker.is_alive():
                         self.log.info("Background worker process is running but should not run, stopping")
@@ -527,12 +543,14 @@ class EventListener(threading.Thread):
                 # because I don't know what it could mean.
                 ha_notif_type = event['hnot']['type']
 
+                # Always use primary/secondary names, makes the internals and
+                # logging consistent with input configuration
                 if ha_notif_type == _HA_INFO_IS_PRIMARY:
-                    self.q.put(('ha-mode', _HA_PRIMARY_NAME))
+                    self.q.put(('ha-mode', 'primary'))
                 elif ha_notif_type == events.HA_INFO_IS_NONE:
                     self.q.put(('ha-mode', 'none'))
                 elif ha_notif_type == _HA_INFO_SECONDARY_INITIALIZED:
-                    self.q.put(('ha-mode', _HA_SECONDARY_NAME))
+                    self.q.put(('ha-mode', 'secondary'))
 
     def stop(self):
         self.exit_flag.set()

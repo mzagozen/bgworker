@@ -5,24 +5,12 @@
 # - tbgw-ha-always: should always run, even when HA-mode=none
 # - tbgw-ha-secondary: runs when HA-mode=secondary/slave
 import logging
-import random
-import sys
 import time
 
 import ncs
-from ncs.application import Service
 
 from bgworker import background_process
 
-from _ncs import events
-try:
-    events.HA_INFO_IS_PRIMARY
-except AttributeError:
-    _HA_PRIMARY_NAME = 'master'
-    _HA_SECONDARY_NAME = 'slave'
-else:
-    _HA_PRIMARY_NAME = 'primary'
-    _HA_SECONDARY_NAME = 'secondary'
 
 def test_bgwork(yang_path):
     log = logging.getLogger()
@@ -49,11 +37,11 @@ def test_bgwork(yang_path):
 class Main(ncs.application.Application):
     def setup(self):
         self.log.info('Main RUNNING')
-        self.worker = background_process.Process(self, test_bgwork, ["tbgw"], config_path='/tbgw/enabled', ha_when=_HA_PRIMARY_NAME)
+        self.worker = background_process.Process(self, test_bgwork, ["tbgw"], config_path='/tbgw/enabled', ha_when=background_process.HaWhen.PRIMARY)
         self.register_action('tbgw-restart', background_process.RestartWorker, init_args=self.worker)
         self.register_action('tbgw-emergency-stop', background_process.EmergencyStop, init_args=self.worker)
-        self.worker_ha_always = background_process.Process(self, test_bgwork, ["tbgw-ha-always"], config_path='/tbgw-ha-always/enabled', ha_when='always')
-        self.worker_ha_secondary = background_process.Process(self, test_bgwork, ["tbgw-ha-secondary"], config_path='/tbgw-ha-secondary/enabled', ha_when=_HA_SECONDARY_NAME)
+        self.worker_ha_always = background_process.Process(self, test_bgwork, ["tbgw-ha-always"], config_path='/tbgw-ha-always/enabled', ha_when=background_process.HaWhen.ALWAYS)
+        self.worker_ha_secondary = background_process.Process(self, test_bgwork, ["tbgw-ha-secondary"], config_path='/tbgw-ha-secondary/enabled', ha_when=background_process.HaWhen.SECONDARY)
         self.worker.start()
         self.worker_ha_always.start()
         self.worker_ha_secondary.start()

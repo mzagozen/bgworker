@@ -15,8 +15,8 @@ to handle, such as:
  - background worker process dying (will restart it)
  - configuration changes - enabling/disabling of the background worker
  - HA events - only run background process when in specified HA mode
-   - per default runs when HA is disabled or HA mode = =primary=/=master=
-   - can also be set to run when in HA mode =none= or =secondary=/=slave=
+   - per default runs when HA is disabled or HA mode = =primary= (legacy =master=)
+   - can also be set to run when in HA mode =none= or =secondary= (legacy =slave=)
    - or set to =always= to always run regardless of current HA mode
 
 The example code in this package does not demonstrate all the abilities of the
