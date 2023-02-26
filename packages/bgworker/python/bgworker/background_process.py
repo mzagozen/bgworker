@@ -375,26 +375,6 @@ class Process(threading.Thread):
         if self.worker.is_alive():
             self.log.error("{}: worker not terminated on time, alive: {}  process: {}".format(self, self.worker.is_alive(), self.worker))
 
-
-    def restart(self):
-        """Restart the background worker process
-
-        We ask the supervisor to restart
-        """
-        self.log.info("Requesting supervisor to restart the background worker process")
-        self.q.put(('restart', None))
-
-    def emergency_stop(self):
-        """Stop the background worker process
-
-        This only has effect while this package is running. Reloading packages
-        or restarting NSO will start the background worker again (if enabled in
-        configuration).
-        """
-        # Disable the worker immediately
-        self.log.info("Requesting supervisor to stop the background worker process")
-        self.q.put(('enabled', False))
-
     def is_running(self):
         """Returns true if the background worker has started and is alive"""
         return self.worker is not None and self.worker.is_alive()
@@ -594,19 +574,30 @@ class WaitableEvent:
         os.close(self._write_fd)
 
 
-class EmergencyStop(ncs.dp.Action):
-    def init(self, worker):  # pylint: disable=arguments-differ
-        self.worker = worker
+class _EmergencyStop(ncs.dp.Action):
+    """Stop the background worker process
+
+    This only has effect while this package is running. Reloading packages
+    or restarting NSO will start the background worker again (if enabled in
+    configuration).
+    """
+    def init(self, init_args):
+        self.q, self.config_path = init_args
 
     @ncs.dp.Action.action
     def cb_action(self, uinfo, name, kp, action_input, action_output, t_read):
-        self.worker.emergency_stop()
+        self.log.info("Requesting supervisor to stop the background worker process")
+        self.q.put(('enabled', False))
         action_output.result = 'Background worker temporarily stopped. Disable in configuration to make it permanent. Package reload or restart of NSO will start it again. To manually restart, issue the \'restart\' action.'
 
 
-class RestartWorker(ncs.dp.Action):
-    def init(self, worker):  # pylint: disable=arguments-differ
-        self.worker = worker
+class _RestartWorker(ncs.dp.Action):
+    """Restart the background worker process
+
+    We ask the supervisor to restart
+    """
+    def init(self, init_args):
+        self.q, self.config_path = init_args
 
     @ncs.dp.Action.action
     def cb_action(self, uinfo, name, kp, action_input, action_output, t_read):
@@ -614,14 +605,33 @@ class RestartWorker(ncs.dp.Action):
         # should simply enable it and the worker will start. If it is enabled
         # but not running, it was likely stopped through emergency-stop and we
         # can start it again.
-        if self.worker.config_path:
-            enabled = t_read.get_elem(self.worker.config_path)
+        if self.config_path:
+            enabled = t_read.get_elem(self.config_path)
 
             if enabled:
-                self.worker.restart()
+                self.q.put(('restart', None))
+                self.log.info("Requesting supervisor to restart the background worker process")
                 action_output.result = 'Requested supervisor to restart background worker'
             else:
                 action_output.result = 'The background worker is disabled in configuration. To restart, enable {self.worker.config_path}'
         else:
-            self.worker.restart()
+            self.q.put(('restart', None))
+            self.log.info("Requesting supervisor to restart the background worker process")
             action_output.result = 'Requested supervisor to restart background worker'
+
+
+
+def register_restart_action(app: ncs.application.Application, actionpoint: str, supervisor: Process):
+    """Helper for registering the RestartWorker and EmergencyStop action classes
+
+    This helper hooks up the action callback class (RestartWorker or
+    EmergencyStop) with the supervisor thread using the correct arguments."""
+    app.register_action(actionpoint, _RestartWorker, init_args=(supervisor.q, supervisor.config_path))
+
+
+def register_emergency_stop_action(app: ncs.application.Application, actionpoint: str, supervisor: Process):
+    """Helper for registering the RestartWorker and EmergencyStop action classes
+
+    This helper hooks up the action callback class (RestartWorker or
+    EmergencyStop) with the supervisor thread using the correct arguments."""
+    app.register_action(actionpoint, _EmergencyStop, init_args=(supervisor.q, supervisor.config_path))
