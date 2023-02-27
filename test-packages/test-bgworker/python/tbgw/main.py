@@ -38,8 +38,8 @@ class Main(ncs.application.Application):
     def setup(self):
         self.log.info('Main RUNNING')
         self.worker = background_process.Process(self, test_bgwork, ["tbgw"], config_path='/tbgw/enabled', ha_when=background_process.HaWhen.PRIMARY)
-        self.register_action('tbgw-restart', background_process.RestartWorker, init_args=self.worker)
-        self.register_action('tbgw-emergency-stop', background_process.EmergencyStop, init_args=self.worker)
+        background_process.register_restart_action(self, 'tbgw-restart', self.worker)
+        background_process.register_emergency_stop_action(self, 'tbgw-emergency-stop', self.worker)
         self.worker_ha_always = background_process.Process(self, test_bgwork, ["tbgw-ha-always"], config_path='/tbgw-ha-always/enabled', ha_when=background_process.HaWhen.ALWAYS)
         self.worker_ha_secondary = background_process.Process(self, test_bgwork, ["tbgw-ha-secondary"], config_path='/tbgw-ha-secondary/enabled', ha_when=background_process.HaWhen.SECONDARY)
         self.worker.start()
