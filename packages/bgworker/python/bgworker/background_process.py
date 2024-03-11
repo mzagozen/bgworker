@@ -139,7 +139,7 @@ class Process(threading.Thread):
         self.config_path = config_path
         self.ha_when = ha_when
         self.backoff_timer = backoff_timer
-        self.parent_pipe = None
+        self.parent_pipe: Optional[Any] = None
         self.run_during_upgrade = run_during_upgrade
 
         self.log = app.log
