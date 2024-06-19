@@ -1,0 +1,77 @@
+name: CI
+
+on: [push, pull_request]
+
+env:
+# TODO: get this from some context? variable
+  VERSION_SET: mzagozen
+  CI_PIPELINE_ID: ${{ github.run_id }}
+  CI_REGISTRY: ghcr.io
+  CI_PROJECT_NAMESPACE: ${{ github.repository_owner }}
+
+jobs:
+  # Get the NSO tip-of-train versions from the nso-docker (sibling) repository
+  get-nso-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.get-versions.outputs.versions }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.NID_NSO_DOCKER || format('{0}/nso-docker', github.repository_owner) }}
+        sparse-checkout: version-sets/${{ env.VERSION_SET }}
+    - name: Get NSO tip-of-train versions
+      id: get-versions
+      run: |
+        echo "versions=$(jq -c '[ .[] | select(.is_tot == true) ]' version-sets/${VERSION_SET}/versions-lod.json)" >> $GITHUB_OUTPUT
+
+  build:
+    runs-on: ubuntu-latest
+    needs: get-nso-versions
+    strategy:
+      matrix:
+        include: ${{fromJson(needs.get-nso-versions.outputs.versions)}}
+    env:
+      NSO_VERSION: ${{ matrix.version }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Login to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.CI_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Building base and dev image
+      run: make build
+    - name: "Testing images"
+      run: make test
+    - name: Pushing images
+      if: ${{ vars.DOCKER_PUSH != 'false' }}
+      run: make push
+
+  push:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && vars.DOCKER_PUSH != 'false' }}
+    needs:
+    - get-nso-versions
+    - build
+    strategy:
+      matrix:
+        include: ${{fromJson(needs.get-nso-versions.outputs.versions)}}
+    env:
+      NSO_VERSION: ${{ matrix.version }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Login to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.CI_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pulling images
+      run: make pull
+    - name: Tagging release
+      run: make tag-release
+    - name: Pushing images
+      run: make push-release
